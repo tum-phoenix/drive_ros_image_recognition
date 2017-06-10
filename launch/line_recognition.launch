@@ -1,0 +1,5 @@
+<launch>
+    <node name="line_recognition_node" pkg="drive_ros_image_recognition" type="line_recognition_node" respawn="false" output="screen">
+        <remap from="img_in" to="incoming_image"/>
+    </node>
+</launch>
