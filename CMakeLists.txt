@@ -34,6 +34,7 @@ add_executable(line_recognition_node
     src/line_recognition_node.cpp
     src/line_recognition.cpp
     src/edge_point.cpp
+#    src/line_point.cpp
     )
 
 add_dependencies(line_recognition_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -50,7 +51,28 @@ install(TARGETS line_recognition_node
     )
 
 ################################################################################
-# image publisher node
+# Warp image node
+################################################################################
+add_executable(warp_image_node
+    src/warp_image_node.cpp
+    src/warp_image.cpp
+    )
+
+add_dependencies(warp_image_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(warp_image_node
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    )
+
+install(TARGETS warp_image_node
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
+# Image publisher node
 ################################################################################
 add_executable(image_publisher_node
     src/image_publisher_node.cpp
@@ -81,5 +103,10 @@ install(DIRECTORY include/${PROJECT_NAME}/
 install(DIRECTORY launch/
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
     FILES_MATCHING PATTERN "*.launch"
+    )
+
+install(DIRECTORY config/
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+    FILES_MATCHING PATTERN "*.yaml"
     )
 

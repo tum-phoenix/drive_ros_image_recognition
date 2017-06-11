@@ -21,7 +21,7 @@ int main(int argc, char** argv)
   std::string image_folder;
   if (!nh.getParam("image_folder",image_folder)) {
     ROS_ERROR("Unable to get 'image_folder' parameter, shutting down node.");
-    return 0;
+    return 1;
   }
 
   std::vector<cv::String> filenames;
@@ -30,6 +30,7 @@ int main(int argc, char** argv)
 
   if (filenames.size() == 0) {
     ROS_ERROR("No images found in provided folder, shutting down");
+    return 1;
   }
 
   size_t i = 0;
@@ -47,4 +48,5 @@ int main(int argc, char** argv)
       publish_rate.sleep();
       ++i;
   }
+  return 0;
 }

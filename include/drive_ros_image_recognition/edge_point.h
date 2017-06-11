@@ -39,7 +39,7 @@ public:
             findMax(false) {
         }
 
-        // replace with dynamic reconfigure or nodehandle params in the future (ROS-native)
+        // todo: replace with dynamic reconfigure or nodehandle params in the future (ROS-native)
         virtual void fromConfig (const EdgePointParam *config) {//(const lms::Config *config){
             // todo: get rid of those params completely, together with sobelArray class, use smarter reconfigure instead
             //SobelArrayParam::fromConfig(config);

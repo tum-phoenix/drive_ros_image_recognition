@@ -1,6 +1,4 @@
 #include <drive_ros_image_recognition/line_recognition.h>
-#include <opencv2/imgproc/imgproc.hpp>
-#include <opencv2/highgui/highgui.hpp>
 
 namespace drive_ros_image_recognition {
 
@@ -14,10 +12,12 @@ LineRecognition::~LineRecognition() {
 }
 
 void LineRecognition::img_callback(const sensor_msgs::ImageConstPtr& msg) {
-  cv_bridge::CvImagePtr cv_ptr;
+  cv::Mat cv_ptr;
   try
   {
-    cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+    // todo: check if this if we have 8 or 16 greyscale images
+    // hardcopies for now, might be possible to process on pointer if fast enough
+    cv_ptr = cv_bridge::toCvCopy(msg, "mono16")->image;
   }
   catch (cv_bridge::Exception& e)
   {
@@ -25,7 +25,7 @@ void LineRecognition::img_callback(const sensor_msgs::ImageConstPtr& msg) {
     return;
   }
 
-  if( !cv_ptr->image.data)
+  if( !cv_ptr.data)
   {
     ROS_WARN("Empty image received, skipping!");
     return;
@@ -38,7 +38,7 @@ void LineRecognition::img_callback(const sensor_msgs::ImageConstPtr& msg) {
   cv::Mat grad;
 
   cv::Mat img_blurred;
-  cv::GaussianBlur( cv_ptr->image, img_blurred, cv::Size(3,3), 0, 0, cv::BORDER_DEFAULT );
+  cv::GaussianBlur( cv_ptr, img_blurred, cv::Size(3,3), 0, 0, cv::BORDER_DEFAULT );
 
   // convert to grayscale
   cv::cvtColor( img_blurred, img_blurred, CV_BGR2GRAY );
