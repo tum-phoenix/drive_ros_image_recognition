@@ -20,6 +20,6 @@ private:
   image_transport::Subscriber img_sub_;
 };
 
-} // end drive_ros_image_recognition namespace
+} // namespace drive_ros_image_recognition
 
-#endif
+#endif // LINE_RECOGNTION_H
