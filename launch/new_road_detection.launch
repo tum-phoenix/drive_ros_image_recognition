@@ -1,0 +1,10 @@
+<launch>
+    <node name="new_road_detection" pkg="drive_ros_image_recognition" type="new_road_detection" respawn="false" output="screen">
+        <remap from="img_in" to="camera_image"/>
+        <!-- todo: road detection output channel, as we have not decided on the interface yet, will comment for now
+        <remap from="road" to "middle_lane"/> -->
+        <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
+        <remap from="car" to "car_out"/> -->
+        <rosparam command="load" file="$(find drive_ros_image_recognition)/new_road_detection.yaml"/>
+    </node>
+</launch>
