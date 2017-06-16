@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
     roscpp
     sensor_msgs
     std_msgs
+    dynamic_reconfigure
 #temp include to expedite transtition of new_road_detection -> todo: move to common message storage, not created yet
     message_generation
     geometry_msgs
@@ -27,6 +28,10 @@ generate_messages(
     std_msgs
     geometry_msgs
     )
+
+generate_dynamic_reconfigure_options(
+  cfg/NewRoadDetection.cfg
+)
 
 catkin_package(
   INCLUDE_DIRS include
@@ -75,7 +80,7 @@ add_executable(new_road_detection
     src/new_road_detection_node.cpp
     )
 
-add_dependencies(new_road_detection ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(new_road_detection ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(new_road_detection
     ${catkin_LIBRARIES}
