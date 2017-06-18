@@ -173,9 +173,10 @@ std::vector<cv::Point2f> NewRoadDetection::findBySobel(cv::LineIterator it,
                                    const float iDist,
                                    const float wDist)
 {
-  std::vector<cv::Point2f> found_points();
+  std::vector<cv::Point2f> foundPoints;
   bool foundLowHigh = false;
   int pxlCounter = 0;
+  cv::LineIterator it_backup = it;
 
   cv::Rect rect(cv::Point(),cv::Point(current_image_->rows, current_image_->cols));
 
@@ -184,14 +185,16 @@ std::vector<cv::Point2f> NewRoadDetection::findBySobel(cv::LineIterator it,
     // safety check : is the point inside the image
     if(!rect.contains(it.pos())){
       ROS_WARN("Received an invalid point outside the image to check for Sobel");
-      return found_points();
+      return foundPoints;
     }
 
     //da wir von links nach rechts suchen ist positiver sobel ein dunkel-hell übergang
     int sobel = (int)current_image_sobel_->at<unsigned char>(it.pos().x,it.pos().y);
     if(sobel > sobelThreshold_){
+      // found low-high pass (on the left side of the line)
       if(!foundLowHigh){
         foundLowHigh = true;
+        pxlCounter = 0;
       }
     }else if(sobel < -sobelThreshold_){ //hell-dunkel übergang
       //check if we found a lowHigh + highLow border
@@ -207,8 +210,11 @@ std::vector<cv::Point2f> NewRoadDetection::findBySobel(cv::LineIterator it,
         if(pxlCounter > pxlPeakWidth*minLineWidthMul_ && pxlCounter < pxlPeakWidth*maxLineWidthMul_){
           //we found a valid point
           //get the middle
+          // todo: make this more elegant in both sobel and brightness (no std::advance for lineIterator)
+          for (int iter = 0; iter<(i-pxlCounter/2); iter++, ++it_backup) {
+          }
           cv::Point2f wMid;
-          imageToWorld(xv[k-pxlCounter/2],yv[k-pxlCounter/2],wMid.x,wMid.y);
+          imageToWorld(it_backup.pos(),wMid);
           foundPoints.push_back(wMid);
           //logger.debug("")<<"crossing FOUND VALID CROSSING";
         }
@@ -217,11 +223,17 @@ std::vector<cv::Point2f> NewRoadDetection::findBySobel(cv::LineIterator it,
       foundLowHigh = false;
       //if not, we dont have to do anything
     }
+
+    // for calculation of line width
+    if(foundLowHigh){
+      pxlCounter++;
+    }
   }
-  return found_points();
+  return foundPoints;
 }
 
 std::vector<cv::Point2f> NewRoadDetection::findByBrightness( cv::LineIterator it,
+                                                             const float lineWidth,
                                                              const float iDist,
                                                              const float wDist )
 {
@@ -247,8 +259,7 @@ std::vector<cv::Point2f> NewRoadDetection::findByBrightness( cv::LineIterator it
     }
 
     //detect peaks
-    // todo: fix hardcoded line width here as well
-    float pxlPeakWidth = iDist/wDist*0.02; //TODO to bad, calculate for each road line (how should we use them for searching?
+    float pxlPeakWidth = iDist/wDist*lineWidth; //TODO to bad, calculate for each road line (how should we use them for searching?
     int tCounter = 0;
     // todo: make this more efficient
     for(int k = 0; k < (int)color.size(); k++){
@@ -420,7 +431,8 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
         // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
         foundPoints = findBySobel(it,0.02,iDist,wDist);
       }else{
-        foundPoints = findByBrightness(it,iDist,wDist);
+        // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
+        foundPoints = findByBrightness(it,0.02,iDist,wDist);
       }
 
     // draw unfiltered image points

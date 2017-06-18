@@ -131,17 +131,17 @@ class NewRoadDetection {
                      const float wDist);
 
     std::vector<cv::Point2f> findByBrightness(cv::LineIterator it,
-                     const float iDist,
-                     const float wDist);
+                                              const float lineWidth,
+                                              const float iDist,
+                                              const float wDist);
+
+    void processSearchLine(const SearchLine &line);
+    void threadFunction();
 
 public:
     NewRoadDetection(ros::NodeHandle nh, ros::NodeHandle pnh);
     ~NewRoadDetection();
     bool init();
-
-    void processSearchLine(const SearchLine &line);
-
-    void threadFunction();
 };
 
 #endif // NEW_ROAD_DETECTION_H
