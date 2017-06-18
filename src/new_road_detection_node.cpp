@@ -4,8 +4,9 @@ int main(int argc, char** argv)
 {
   ros::init(argc, argv, "new_road_detection");
   ros::NodeHandle nh;
+  ros::NodeHandle pnh("~");
 
-  drive_ros_image_recognition::NewRoadDetection new_road_detection = drive_ros_image_recognition::NewRoadDetection(nh);
+  NewRoadDetection new_road_detection(nh,pnh);
   if (!new_road_detection.init()) {
     return 1;
   }

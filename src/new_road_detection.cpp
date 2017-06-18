@@ -7,22 +7,37 @@
 //#include <detection_utils.h>
 //#include <warp_service/warp_service.h>
 
-bool NewRoadDetection::NewRoadDetection(ros::NodeHandle nh):
+NewRoadDetection::NewRoadDetection(ros::NodeHandle nh, ros::NodeHandle pnh):
   nh_(nh),
-  image_sub_(),
+  pnh_(pnh),
+  img_sub_(),
   my_namespace_("new_road_detection"),
   searchOffset_(0.15),
   distanceBetweenSearchlines_(0.1),
   minLineWidthMul_(0.5),
   maxLineWidthMul_(2),
   findPointsBySobel_(true),
-  threshold_(50),
+  brightness_threshold_(50),
   sobelThreshold_(50),
   laneWidthOffsetInMeter_(0.1),
   translateEnvironment_(false),
   useWeights_(false),
   renderDebugImage_(false),
-  numThreads_(4)
+  numThreads_(4),
+  road_sub_(),
+  debug_image_(0,0,CV_16UC1),
+  line_output_pub_(),
+  it_(pnh),
+  dsrv_server_(),
+  dsrv_cb_(boost::bind(&NewRoadDetection::reconfigureCB, this, _1, _2)),
+  lines_(),
+  threadsRunning_(false),
+  linesToProcess_(0),
+  threads_(),
+  conditionNewLine_(),
+  conditionLineProcessed_(),
+  current_image_(),
+  current_image_sobel_()
 {
 }
 
@@ -48,8 +63,8 @@ bool NewRoadDetection::init() {
     ROS_WARN_STREAM("Unable to load 'findBySobel' parameter, using default: "<<findPointsBySobel_);
   }
 
-  if (!pnh_.getParam(my_namespace_+"threshold", threshold_)) {
-    ROS_WARN_STREAM("Unable to load 'threshold' parameter, using default: "<<threshold_);
+  if (!pnh_.getParam(my_namespace_+"brightness_threshold", brightness_threshold_)) {
+    ROS_WARN_STREAM("Unable to load 'threshold' parameter, using default: "<<brightness_threshold_);
   }
 
   if (!pnh_.getParam(my_namespace_+"sobelThreshold", sobelThreshold_)) {
@@ -76,10 +91,11 @@ bool NewRoadDetection::init() {
     ROS_WARN_STREAM("Unable to load 'threads' parameter, using default: "<<numThreads_);
   }
 
-    image_sub_ = nh_.subscribe("image", &NewRoadDetection::imageCallback, this);
-    // todo: we have not defined the interface for these yet
-//    road = writeChannel<street_environment::RoadLane>("ROAD");
-    //output = writeChannel<street_environment::RoadLane>("ROAD_OUTPUT");
+  dsrv_server_.setCallback(dsrv_cb_);
+
+  img_sub_ = it_.subscribe("image", 10, &NewRoadDetection::imageCallback, this);
+  road_sub_ = nh_.subscribe("road_in", 100, &NewRoadDetection::roadCallback, this);
+  line_output_pub_ = nh_.advertise<drive_ros_image_recognition::RoadLaneConstPtr>("line_out",10);
 
 #ifdef DRAW_DEBUG
     debug_img_pub_ = nh_.advertise("/debug_image_out", 10);
@@ -96,12 +112,25 @@ bool NewRoadDetection::init() {
     return true;
 }
 
-void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr img_in) {
-    CvImagePtr img_conv = convertImageMessage(img_in);
+void NewRoadDetection::roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& road_in_) {
+  // use simple singular buffer
+  road_buffer_ = *road_in_;
+}
+
+void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
+    current_image_ = convertImageMessage(img_in);
+    if (renderDebugImage_) {
+      debug_image_ = current_image_->clone();
+    }
+
+    // todo: adjust this time value
+    if (img_in->header.stamp.toSec() - road_buffer_.header.stamp.toSec() > 0.1) {
+      ROS_WARN("Outdated road callback in buffer, skipping incoming image");
+      return;
+    }
 
     //if we have a road(?), try to find the line
-    // todo: no interface for this yet
-    if(road->points().size() > 1){
+    if(road_buffer_.points.size() > 1){
         find(); //TODO use bool from find
     }
 
@@ -116,7 +145,7 @@ void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr img_in) {
 //        dPhi = car->deltaPhi();
 //    }
 
-    // todo: no interface for this yet -> ask Phibedy what this does
+    // todo: no interface for this yet, create course verification service to verfiy and publish
 //    lms::ServiceHandle<local_course::LocalCourse> localCourse = getService<local_course::LocalCourse>("LOCAL_COURSE_SERVICE");
 //    if(localCourse.isValid()){
 //        logger.time("localCourse");
@@ -129,6 +158,8 @@ void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr img_in) {
 //                debugTranslatedPoints->points() = localCourse->getPointsAdded();
 //        }
 #endif
+    // should do something like this
+//    line_output_pub_.publish(road_translated);
 
 //    }else{
 //        ROS_ERROR("LocalCourse invalid, aborting the callback!");
@@ -137,133 +168,199 @@ void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr img_in) {
     return;
 }
 
-std::vector<lms::math::vertex2f> NewRoadDetection::findBySobel(
-        const bool renderDebugImage,
-        const std::vector<int> &xv,
-        const std::vector<int> &yv,
-        const float minLineWidthMul,
-        const float maxLineWidthMul,
-        const float iDist,
-        const float wDist,
-        const int threshold) {
-    return ::findBySobel(image.get(),debugImage.get(),renderDebugImage,xv,yv,minLineWidthMul,maxLineWidthMul,0.02,iDist,wDist,threshold,homo);
-}
-std::vector<lms::math::vertex2f> NewRoadDetection::findByBrightness(const bool renderDebugImage, const std::vector<int> &xv,const std::vector<int> &yv, const float minLineWidthMul, const float maxLineWidthMul,const float iDist,const float wDist, const int threshold){
-    lms::imaging::BGRAImageGraphics graphics(*debugImage);
-    std::vector<lms::math::vertex2f> foundPoints;
-    std::vector<int> color;
-    //get the color from the points
-    if(renderDebugImage)
-        graphics.setColor(lms::imaging::blue);
-    for(int k = 0; k < (int)xv.size(); k++){
-        const int x = xv[k];
-        const int y = yv[k];
-        if(!image->inside(x,y)){
-            color.push_back(0);
-            continue;
-        }
-        color.push_back(*(image->data()+x+y*image->width()));
-        if(renderDebugImage)
-            graphics.drawCross(x,y);
+std::vector<cv::Point2f> NewRoadDetection::findBySobel(cv::LineIterator it,
+                                   const float lineWidth,
+                                   const float iDist,
+                                   const float wDist)
+{
+  std::vector<cv::Point2f> found_points();
+  bool foundLowHigh = false;
+  int pxlCounter = 0;
+
+  cv::Rect rect(cv::Point(),cv::Point(current_image_->rows, current_image_->cols));
+
+  for(int i = 0; i < it.count; i++, ++it)
+  {
+    // safety check : is the point inside the image
+    if(!rect.contains(it.pos())){
+      ROS_WARN("Received an invalid point outside the image to check for Sobel");
+      return found_points();
     }
+
+    //da wir von links nach rechts suchen ist positiver sobel ein dunkel-hell übergang
+    int sobel = (int)current_image_sobel_->at<unsigned char>(it.pos().x,it.pos().y);
+    if(sobel > sobelThreshold_){
+      if(!foundLowHigh){
+        foundLowHigh = true;
+      }
+    }else if(sobel < -sobelThreshold_){ //hell-dunkel übergang
+      //check if we found a lowHigh + highLow border
+      if(foundLowHigh){
+        //check if the points have the right distance
+        float pxlPeakWidth = iDist/wDist*lineWidth; //TODO to bad, calculate for each road line (how should we use them for searching?
+
+        //logger.debug("")<<"crossing found highLow: "<<pxlCounter<<" "<<pxlPeakWidth;
+        //logger.debug("")<<"crossing found max: "<<pxlPeakWidth*maxLineWidthMul;
+        //logger.debug("")<<"crossing found min: "<<pxlPeakWidth*minLineWidthMul;
+
+        // basically returns the middle of a line from multiple points, so will have to loop through the points here
+        if(pxlCounter > pxlPeakWidth*minLineWidthMul_ && pxlCounter < pxlPeakWidth*maxLineWidthMul_){
+          //we found a valid point
+          //get the middle
+          cv::Point2f wMid;
+          imageToWorld(xv[k-pxlCounter/2],yv[k-pxlCounter/2],wMid.x,wMid.y);
+          foundPoints.push_back(wMid);
+          //logger.debug("")<<"crossing FOUND VALID CROSSING";
+        }
+      }
+      pxlCounter = 0;
+      foundLowHigh = false;
+      //if not, we dont have to do anything
+    }
+  }
+  return found_points();
+}
+
+std::vector<cv::Point2f> NewRoadDetection::findByBrightness( cv::LineIterator it,
+                                                             const float iDist,
+                                                             const float wDist )
+{
+    std::vector<cv::Point2f> foundPoints;
+    std::vector<int> color;
+    cv::Rect rect(cv::Point(),cv::Point(current_image_->rows, current_image_->cols));
+    cv::LineIterator it_debug = it;
+
+    for(int i = 0; i < it.count; i++, ++it) {
+      // safety check : is the point inside the image
+      if(!rect.contains(it.pos())){
+        ROS_WARN("Received an invalid point outside the image to check for brightness");
+        color.push_back(0);
+        continue;
+      }
+      color.push_back(current_image_->at<int>(it.pos().x,it.pos().y));
+
+      if (renderDebugImage_) {
+        cv::namedWindow("Unfiltered points processed by brightness search", CV_WINDOW_NORMAL);
+        cv::circle(debug_image_, it.pos(), 2, cv::Scalar(255));
+        cv::imshow("Unfiltered points processed by brightness search", debug_image_);
+      }
+    }
+
     //detect peaks
+    // todo: fix hardcoded line width here as well
     float pxlPeakWidth = iDist/wDist*0.02; //TODO to bad, calculate for each road line (how should we use them for searching?
     int tCounter = 0;
-    if(renderDebugImage)
-        graphics.setColor(lms::imaging::red);
+    // todo: make this more efficient
     for(int k = 0; k < (int)color.size(); k++){
-        if(color[k]>threshold){
-            tCounter++;
-        }else{
-            if(tCounter - k != 0 && tCounter > pxlPeakWidth*minLineWidthMul && tCounter < pxlPeakWidth*maxLineWidthMul){
-                if(renderDebugImage){
-                    for(int j = 0; j<tCounter;j++){
-                        graphics.drawCross(xv[k-j],yv[k-j]);
-                    }
-                }
-                //we found a valid point
-                //get the middle
-                lms::math::vertex2i mid;
-                lms::math::vertex2f wMid;
-                homo.vt(mid,wMid);
-                foundPoints.push_back(wMid);
-            }
-            tCounter = 0;
+      if(color[k]>brightness_threshold_){
+        tCounter++;
+      }else{
+        if(tCounter - k != 0 && tCounter > pxlPeakWidth*minLineWidthMul_ && tCounter < pxlPeakWidth*maxLineWidthMul_){
+          for (int i = 0; i < tCounter; i++, ++it_debug) {
+          }
+          // get points for debug drawing on the way
+          cv::Point point_first = it_debug.pos();
+          for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
+          }
+          cv::Point point_mid = it_debug.pos();
+          for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
+          }
+          cv::Point point_end = it_debug.pos();
+
+          if (renderDebugImage_) {
+            cv::namedWindow("Line detected by brightness", CV_WINDOW_NORMAL);
+            debug_image_ = current_image_->clone();
+
+            cv::line(debug_image_, point_first, point_end, cv::Scalar(255));
+            cv::imshow("Line detected by brightness", debug_image_);
+          }
+
+          //we found a valid point
+          //get the middle
+          cv::Point2i mid = point_mid;
+          cv::Point2f wMid;
+          imageToWorld(mid,wMid);
+          foundPoints.push_back(wMid);
         }
+        tCounter = 0;
+      }
     }
     return foundPoints;
 }
 
 bool NewRoadDetection::find(){
     //clear old lines
-    logger.time("create lines");
-    lines.clear();
-    linesToProcess = 0;
+    ROS_INFO("Creating new lines");
+    lines_.clear();
+    linesToProcess_ = 0;
 
-    //TODO rectangle for neglecting areas
+    // already there in LMS
+//    //TODO rectangle for neglecting areas
 
-    //(TODO calculate threshold for each line)
-    if(renderDebugImage){
+//    //(TODO calculate threshold for each line)
+    if(renderDebugImage_){
         //Clear debug image
-        debugImage->resize(image->width(),image->height(),lms::imaging::Format::BGRA);
-        debugImage->fill(0);
-        debugAllPoints->points().clear();
-        debugValidPoints->points().clear();
-        debugTranslatedPoints->points().clear();
+        debug_image_.resize(current_image_->rows,current_image_->cols);
     }
 
     //create left/mid/right lane
-    lms::math::polyLine2f mid = road->getWithDistanceBetweenPoints(config().get<float>("distanceBetweenSearchlines",0.2));
-    lms::math::polyLine2f left = mid.moveOrthogonal(-0.4);
-    lms::math::polyLine2f right = mid.moveOrthogonal(0.4);
-    if(mid.points().size() != left.points().size() || mid.points().size() != right.points().size()){
-        logger.error("invalid midlane given!");
-        return false;
+    // todo: move to eigen and port this
+    std::vector<cv::Point2f> mid = road->getWithDistanceBetweenPoints(config().get<float>("distanceBetweenSearchlines",0.2));
+    std::vector<cv::Point2f> left = mid.moveOrthogonal(-0.4);
+    std::vector<cv::Point2f> right = mid.moveOrthogonal(0.4);
+    if(mid.size() != left.size() || mid.size() != right.size()){
+      ROS_ERROR("Generated lane sizes do not match! Aborting search!");
+      return false;
     }
     //get all lines
-    for(int i = 0; i< (int)mid.points().size(); i++){
+    for(int i = 0; i< mid.size(); i++){
         SearchLine l;
-        l.w_start = left.points()[i];
-        l.w_end = right.points()[i];
-        l.w_left = left.points()[i];
-        l.w_mid = mid.points()[i];
-        l.w_right = right.points()[i];
+        l.w_start = left[i];
+        l.w_end = right[i];
+        l.w_left = left[i];
+        l.w_mid = mid[i];
+        l.w_right = right[i];
         //check if the part is valid (middle should be always visible)
-        if(!image->inside(l.w_start.x,l.w_start.y)){
-            l.w_start = mid.points()[i];
-            if(!image->inside(l.w_end.x,l.w_end.y)){
+
+        // todo: implement transformation functions from world to map and reversed
+        // maybe this would be a good use for services (from the preprocessing node, has access to homography stuff anyway)
+        int l_w_startx, l_w_starty, l_w_endx, l_w_endy;
+        worldToImage(l.w_start.x, l.w_start.y, l_w_startx, l_w_starty);
+        worldToImage(l.w_end.x, l.w_end.y, l_w_endx, l_w_endy);
+        cv::Rect img_rect(cv::Point(),cv::Point(current_image_->cols,current_image_->rows));
+        if(!img_rect.contains(cv::Point(l_w_startx,l_w_starty))){
+            // try middle lane -> should always be in image
+            l.w_start = mid[i];
+            worldToImage(l.w_start.x, l.w_start.y, l_w_startx, l_w_starty);
+            if(img_rect.contains(cv::Point(l_w_startx,l_w_starty))){
                 continue;
             }
-        }else if(!image->inside(l.w_end.x,l.w_end.y)){
-            l.w_end = mid.points()[i];
+        }else if(!img_rect.contains(cv::Point(l_w_endx,l_w_endy))){
+            l.w_end = mid[i];
         }
 
         //transform them in image-coordinates
-        homo.vti(l.i_start,l.w_start);
-        homo.vti(l.i_end,l.w_end);
-        {
-            std::unique_lock<std::mutex> lock(mutex);
-            lines.push_back(l);
-            linesToProcess ++;
-            conditionNewLine.notify_one();
-        }
-    }
-    logger.timeEnd("create lines");
+        std::unique_lock<std::mutex> lock(mutex);
+        lines_.push_back(l);
+        linesToProcess_++;
 
-    logger.time("search");
-    if(numThreads == 0) {
+        // todo: figure out what this does (no internet)
+//        conditionNewLine.notify_one();
+    }
+
+    if(numThreads_ == 0) {
         // single threaded
-        for(SearchLine &l:lines){
+        for(SearchLine &l:lines_){
             processSearchLine(l);
         }
     } else {
         // multi threaded
 
         // initialize and start threads if not yet there
-        if(threads.size() == 0) {
-            threadsRunning = true;
-            for(int i = 0; i < numThreads; i++) {
-                threads.emplace_back([this] () {
+        if(threads_.size() == 0) {
+            threadsRunning_ = true;
+            for(int i = 0; i < numThreads_; i++) {
+                threads_.emplace_back([this] () {
                     threadFunction();
                 });
             }
@@ -272,24 +369,23 @@ bool NewRoadDetection::find(){
         // wait till every search line was processed
         {
             std::unique_lock<std::mutex> lock(mutex);
-            while(linesToProcess > 0) conditionLineProcessed.wait(lock);
+            while(linesToProcess_ > 0) conditionNewLine_.wait(lock);
         }
     }
-    logger.timeEnd("search");
     return true;
 }
 
 void NewRoadDetection::threadFunction() {
-    while(threadsRunning) {
+    while(threadsRunning_) {
         SearchLine line;
         {
             std::unique_lock<std::mutex> lock(mutex);
-            while(threadsRunning && lines.empty()) conditionNewLine.wait(lock);
-            if(lines.size() > 0) {
-                line = lines.front();
-                lines.pop_front();
+            while(threadsRunning_ && lines_.empty()) conditionNewLine_.wait(lock);
+            if(lines_.size() > 0) {
+                line = lines_.front();
+                lines_.pop_front();
             }
-            if(! threadsRunning) {
+            if(!threadsRunning_) {
                 break;
             }
         }
@@ -302,41 +398,57 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
     std::vector<int> yv;
 
     //calculate the offset
-    float iDist = l.i_start.distance(l.i_end);
-    float wDist = l.w_start.distance(l.w_end);
-    float pxlPerDist = iDist/wDist*searchOffset;
-    lms::math::vertex2f iDiff = lms::math::vertex2f(l.i_start-l.i_end).normalize();
-    lms::math::vertex2f startLine = lms::math::vertex2f(l.i_start)+iDiff*pxlPerDist;
-    lms::math::vertex2f endLine = lms::math::vertex2f(l.i_end)-iDiff*pxlPerDist;
-    //get all points in between
-    lms::math::bresenhamLine(startLine.x,startLine.y,endLine.x,endLine.y,xv,yv); //wir suchen von links nach rechts!
+    float iDist = cv::norm(l.i_end - l.i_start);
+    float wDist = cv::norm(l.w_end - l.w_start);
+//    float pxlPerDist = iDist/wDist*searchOffset_;
+//    lms::math::vertex2f iDiff = lms::math::vertex2f(l.i_start-l.i_end).normalize();
+//    lms::math::vertex2f startLine = lms::math::vertex2f(l.i_start)+iDiff*pxlPerDist;
+//    lms::math::vertex2f endLine = lms::math::vertex2f(l.i_end)-iDiff*pxlPerDist;
+//    //get all points in between
+//    lms::math::bresenhamLine(startLine.x,startLine.y,endLine.x,endLine.y,xv,yv); //wir suchen von links nach rechts!
 
-    //find points
-    std::vector<lms::math::vertex2f> foundPoints;
-    if(findPointsBySobel){
-       foundPoints = findBySobel(renderDebugImage,xv,yv,minLineWidthMul,maxLineWidthMul,iDist,wDist,sobelThreshold);
-    }else{
-       foundPoints = findByBrightness(renderDebugImage,xv,yv,minLineWidthMul,maxLineWidthMul,iDist,wDist,threshold);
-    }
+    // generate Bresenham search line
+    cv::LineIterator it(*current_image_,l.i_start,l.i_end);
 
-    if(renderDebugImage) {
+    std::vector<cv::Point2f> foundPoints;
+      //find points
+      if(findPointsBySobel_){
+        // directly apply sobel operations on the image -> we only use the grad_x here as we only search horizontally
+        // we perform order of 1 operations only
+        // todo: check if CV_8UC1 is valid
+        cv::Sobel( *current_image_, *current_image_sobel_, CV_8UC1, 1, 0, 3, 1, 0, cv::BORDER_DEFAULT );
+        // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
+        foundPoints = findBySobel(it,0.02,iDist,wDist);
+      }else{
+        foundPoints = findByBrightness(it,iDist,wDist);
+      }
+
+    // draw unfiltered image points
+    if(renderDebugImage_) {
         std::unique_lock<std::mutex> lock(debugAllPointsMutex);
-        for(lms::math::vertex2f &v:foundPoints)
-            debugAllPoints->points().push_back(v);
+        cv::namedWindow("Unfiltered points", CV_WINDOW_NORMAL);
+        cv::Mat found_points_mat = current_image_->clone();
+        for (auto point : foundPoints) {
+          cv::circle(found_points_mat, point, 2, cv::Scalar(255));
+        }
+        cv::imshow("Unfiltered points", found_points_mat);
     }
 
     //filter
     //TODO filter points that are in poluted regions (for example the car itself)
     //remove points with bad distances
+    std::vector<cv::Point2f> validPoints;
     if(foundPoints.size() > 2){
         std::vector<int> foundCounter;
         foundCounter.resize(foundPoints.size(),0);
         for(std::size_t fp = 0; fp < foundPoints.size(); fp++){
-            const lms::math::vertex2f &s = foundPoints[fp];
+            // todo: insert service here
+            const cv::Point2f &s = foundPoints[fp];
             for(std::size_t test = fp+1; test <foundPoints.size(); test++){
-                const lms::math::vertex2f &toTest  = foundPoints[test];
-                float distance = toTest.distance(s);
-                if((distance > 0.4-laneWidthOffsetInMeter && distance < 0.4 + laneWidthOffsetInMeter)|| (distance > 0.8-laneWidthOffsetInMeter && distance < 0.8+laneWidthOffsetInMeter)){
+              // todo: insert service here
+                const cv::Point2f &toTest  = foundPoints[test];
+                float distance = cv::norm(s-toTest);
+                if((distance > 0.4-laneWidthOffsetInMeter_ && distance < 0.4 + laneWidthOffsetInMeter_)|| (distance > 0.8-laneWidthOffsetInMeter_ && distance < 0.8+laneWidthOffsetInMeter_)){
                     foundCounter[test]++;
                     foundCounter[fp]++;
                 }
@@ -349,37 +461,46 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
                 max = c;
             }
         }
-        std::vector<lms::math::vertex2f> validPoints;
         for(int i = 0; i < (int)foundPoints.size(); i++){
             if(foundCounter[i] >= max){
                 validPoints.push_back(foundPoints[i]);
             }
         }
         //TODO if we have more than 3 points we know that there is an error!
-        foundPoints = validPoints;
+//        foundPoints = validPoints;
+    }
+    else {
+       // just use the 2 points we found otherwise
+       validPoints = foundPoints;
     }
 
-    if(renderDebugImage){
+    // draw filtered points
+    if(renderDebugImage_) {
+        // todo: make some more efficient storage method here, will translate back and forth here for now
         std::unique_lock<std::mutex> lock(debugValidPointsMutex);
-        for(lms::math::vertex2f &v:foundPoints)
-            debugValidPoints->points().push_back(v);
+        cv::namedWindow("Filtered Points", CV_WINDOW_NORMAL);
+        cv::Mat filtered_points_mat = current_image_->clone();
+        for (auto point : validPoints) {
+          cv::circle(filtered_points_mat, worldToImage(point), 2, cv::Scalar(255));
+        }
+        cv::imshow("Filtered Points", filtered_points_mat);
     }
 
     //Handle found points
-    lms::math::vertex2f diff;
+    cv::Point2f diff;
     std::vector<float> distances;
-    for(int i = 0; i < (int)foundPoints.size(); i++){
-        lms::math::vertex2f &wMind = foundPoints[i];
-        float distanceToLeft = wMind.distance(l.w_left);
-        float distanceToRight= wMind.distance(l.w_right);
-        float distanceToMid= wMind.distance(l.w_mid);
-        diff = (l.w_left-l.w_right).normalize();
+    for(int i = 0; i < (int)validPoints.size(); i++){
+        float distanceToLeft = cv::norm(validPoints[i]-l.w_left);
+        float distanceToRight= cv::norm(validPoints[i]-l.w_right);
+        float distanceToMid= cv::norm(validPoints[i]-l.w_mid);
+        // normalize distance
+        diff = (l.w_left - l.w_right)/cv::norm(l.w_left-l.w_right);
         if(distanceToLeft < distanceToMid && distanceToLeft < distanceToRight){
             //left point
-            wMind-=diff*0.4;
+            validPoints[i]-=diff*0.4;
             distances.push_back(distanceToLeft);
         }else if(distanceToRight < distanceToMid ){
-            wMind+=diff*0.4;
+            validPoints[i]+=diff*0.4;
             distances.push_back(distanceToRight);
         }else{
             distances.push_back(distanceToMid);
@@ -389,7 +510,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
     std::vector<float> weights;
     for(const float &dist:distances){
         //as distance is in meter, we multiply it by 100
-        if(useWeights)
+        if(useWeights_)
             weights.push_back(1/(dist*100+0.001)); //TODO hier etwas sinnvolles überlegen
         else
             weights.push_back(1);
@@ -400,48 +521,50 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
             debugTranslatedPoints->points().push_back(v);
     }
     */
-    lms::ServiceHandle<local_course::LocalCourse> localCourse = getService<local_course::LocalCourse>("LOCAL_COURSE_SERVICE");
-    if(localCourse.isValid()){
-        localCourse->addPoints(foundPoints,weights);
-    }else{
-        logger.error("localCourse invalid!");
+    // todo: check how this gets handled and adjust the interface
+    drive_ros_image_recognition::RoadLane lane_out;
+    lane_out.header.stamp = ros::Time::now();
+    geometry_msgs::Point32 point_temp;
+    point_temp.z = 0.f;
+    for (auto point: validPoints) {
+      point_temp.x = point.x;
+      point_temp.y = point.y;
+      lane_out.points.push_back(point_temp);
     }
+    lane_out.roadStateType = drive_ros_image_recognition::RoadLane::UNKNOWN;
+    line_output_pub_.publish(lane_out);
+//    lms::ServiceHandle<local_course::LocalCourse> localCourse = getService<local_course::LocalCourse>("LOCAL_COURSE_SERVICE");
+//    if(localCourse.isValid()){
+//        localCourse->addPoints(foundPoints,weights);
+//    }else{
+//        logger.error("localCourse invalid!");
+//    }
 
-    {
-        std::unique_lock<std::mutex> lock(mutex);
-        linesToProcess --;
-        conditionLineProcessed.notify_all();
-    }
+    std::unique_lock<std::mutex> lock(mutex);
+    linesToProcess_ --;
+    conditionLineProcessed_.notify_all();
 }
 
-void NewRoadDetection::configsChanged(){
-    lms::ServiceHandle<warp_service::WarpService> warp = getService<warp_service::WarpService>("WARP_SERVICE");
-    if(!warp.isValid()){
-        logger.error("WARP SERVICE is invalid!")<<"shutting down!";
-        exit(0); //TODO shut down runtime
-    }else{
-        homo = warp->getHomography();
-    }
-    // read config
-    searchOffset = config().get<float>("searchOffset",0.1);
-    findPointsBySobel = config().get<bool>("findBySobel",true);
-    renderDebugImage = config().get<bool>("renderDebugImage",false);
-    minLineWidthMul = config().get<float>("minLineWidthMul",0.5);
-    maxLineWidthMul = config().get<float>("maxLineWidthMul",1.5);
-    threshold = config().get<int>("threshold",200);
-    laneWidthOffsetInMeter = config().get<float>("laneWidthOffsetInMeter",0.1);
-    useWeights = config().get<bool>("useWeights",false);
-    sobelThreshold = config().get<int>("sobelThreshold",200);
-    numThreads = config().get<int>("threads",0);
+void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::new_road_detectionConfig& config, uint32_t level){
+    searchOffset_ = config.searchOffset;
+    findPointsBySobel_ = config.findBySobel;
+    renderDebugImage_ = config.renderDebugImage;
+    minLineWidthMul_ = config.minLineWidthMul;
+    maxLineWidthMul_ = config.maxLineWidthMul;
+    brightness_threshold_ = config.brightness_threshold;
+    laneWidthOffsetInMeter_ = config.laneWidthOffsetInMeter;
+    useWeights_ = config.useWeights;
+    sobelThreshold_ = config.sobelThreshold;
+    numThreads_ = config.threads;
 }
 
-void NewRoadDetection::destroy() {
+NewRoadDetection::~NewRoadDetection() {
     {
         std::unique_lock<std::mutex> lock(mutex);
-        threadsRunning = false;
-        conditionNewLine.notify_all();
+        threadsRunning_ = false;
+        conditionNewLine_.notify_all();
     }
-    for(auto &t : threads) {
+    for(auto &t : threads_) {
         if(t.joinable()) {
             t.join();
         }

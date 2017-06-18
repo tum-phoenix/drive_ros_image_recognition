@@ -4,7 +4,7 @@ new_road_detection:
     minLineWidthMul: 0.5
     maxLineWidthMul: 2
     findBySobel: true
-    threshold: 50
+    brightness_threshold: 50
     sobelThreshold: 50
     laneWidthOffsetInMeter: 0.1
     translateEnvironment: false
