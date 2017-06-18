@@ -17,6 +17,9 @@ find_package(catkin REQUIRED COMPONENTS
     message_generation
 )
 
+#include Boost for lane line processing
+find_package(Boost REQUIRED)
+
 add_message_files(
     FILES
     RoadLane.msg
@@ -49,6 +52,7 @@ include_directories(
     include
     ${catkin_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
     )
 
 ################################################################################
@@ -90,6 +94,7 @@ add_dependencies(new_road_detection ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXP
 target_link_libraries(new_road_detection
     ${catkin_LIBRARIES}
     ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
     )
 
 install(TARGETS new_road_detection

@@ -41,7 +41,8 @@ NewRoadDetection::NewRoadDetection(ros::NodeHandle nh, ros::NodeHandle pnh):
   current_image_(),
   current_image_sobel_(),
   worldToImageClient_(),
-  imageToWorldClient_()
+  imageToWorldClient_(),
+  road_buffer_()
 {
 }
 
@@ -99,7 +100,7 @@ bool NewRoadDetection::init() {
 
   img_sub_ = it_.subscribe("image", 10, &NewRoadDetection::imageCallback, this);
   road_sub_ = nh_.subscribe("road_in", 100, &NewRoadDetection::roadCallback, this);
-  line_output_pub_ = nh_.advertise<drive_ros_image_recognition::RoadLaneConstPtr>("line_out",10);
+  line_output_pub_ = nh_.advertise<drive_ros_image_recognition::RoadLane>("line_out",10);
 
 #ifdef DRAW_DEBUG
     debug_img_pub_ = nh_.advertise("/debug_image_out", 10);
@@ -359,41 +360,45 @@ bool NewRoadDetection::find(){
     }
 
     //create left/mid/right lane
-    // todo: move to eigen and port this
-    std::vector<cv::Point2f> mid = road->getWithDistanceBetweenPoints(config().get<float>("distanceBetweenSearchlines",0.2));
-    std::vector<cv::Point2f> left = mid.moveOrthogonal(-0.4);
-    std::vector<cv::Point2f> right = mid.moveOrthogonal(0.4);
+    linestring mid, left, right;
+    for (auto point : road_buffer_.points) {
+      boost::geometry::append(mid,point_xy(point.x, point.y));
+    }
+    // simplify mid (previously done with distance-based algorithm
+    drive_ros_geometry_common::simplify(mid, mid, distanceBetweenSearchlines_);
+    drive_ros_geometry_common::moveOrthogonal(mid, left, -0.4);
+    drive_ros_geometry_common::moveOrthogonal(mid, right, 0.4);
     if(mid.size() != left.size() || mid.size() != right.size()){
       ROS_ERROR("Generated lane sizes do not match! Aborting search!");
       return false;
     }
     //get all lines
-    for(int i = 0; i< mid.size(); i++){
+    auto it_mid = mid.begin();
+    auto it_left = left.begin();
+    auto it_right = right.begin();
+    for(auto it = 0; it<mid.size(); it++, ++it_mid, ++it_right, ++it_left){
         SearchLine l;
-        l.w_start = left[i];
-        l.w_end = right[i];
-        l.w_left = left[i];
-        l.w_mid = mid[i];
-        l.w_right = right[i];
+        // todo: probably wrong, check which exactly to get, will need end and start on the first probably
+        l.w_start = cv::Point2f(bg::get<0>(*it_left),bg::get<1>(*it_left));
+        l.w_end = cv::Point2f(bg::get<0>(*it_right),bg::get<1>(*it_right));
+        l.w_left = cv::Point2f(bg::get<0>(*it_left),bg::get<1>(*it_left));
+        l.w_mid = cv::Point2f(bg::get<0>(*it_mid),bg::get<1>(*it_mid));
+        l.w_right = cv::Point2f(bg::get<0>(*it_right),bg::get<1>(*it_right));
         //check if the part is valid (middle should be always visible)
 
-        // todo: implement transformation functions from world to map and reversed
-        // maybe this would be a good use for services (from the preprocessing node, has access to homography stuff anyway)
-        int l_w_startx, l_w_starty, l_w_endx, l_w_endy;
-        cv::Point l_w_start;
-        cv::Point l_w_end;
+        cv::Point l_w_start, l_w_end;
         worldToImage(l.w_start, l_w_start);
         worldToImage(l.w_end, l_w_end);
         cv::Rect img_rect(cv::Point(),cv::Point(current_image_->cols,current_image_->rows));
         if(!img_rect.contains(l_w_start)){
             // try middle lane -> should always be in image
-            l.w_start = mid[i];
+            l.w_start = cv::Point2f(bg::get<0>(*it_mid),bg::get<1>(*it_mid));
             worldToImage(l.w_start, l_w_start);
             if(img_rect.contains(l_w_start)){
                 continue;
             }
-        }else if(!img_rect.contains(cv::Point(l_w_endx,l_w_endy))){
-            l.w_end = mid[i];
+        }else if(!img_rect.contains(l_w_end)){
+            l.w_end = cv::Point2f(bg::get<0>(*it_mid),bg::get<1>(*it_mid));
         }
 
         //transform them in image-coordinates

@@ -9,6 +9,7 @@
 #include <drive_ros_image_recognition/RoadLane.h>
 #include <dynamic_reconfigure/server.h>
 #include <drive_ros_image_recognition/new_road_detectionConfig.h>
+#include <drive_ros_image_recognition/geometry_common.h>
 //#include <lms/module.h>
 //#include <street_environment/road.h>
 //#include <street_environment/car.h>
@@ -28,9 +29,10 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
   CvImagePtr cv_ptr;
   try
   {
-    // todo: check if this if we have 8 or 16 greyscale images
     // hardcopies for now, might be possible to process on pointer if fast enough
-    cv_ptr = cv_bridge::toCvCopy(img_in, "mono16");
+    // todo: make prettier
+    cv_bridge::CvImagePtr temp_ptr = cv_bridge::toCvCopy(*img_in, "");
+    cv_ptr.reset(new cv::Mat(temp_ptr->image) );
   }
   catch (cv_bridge::Exception& e)
   {
