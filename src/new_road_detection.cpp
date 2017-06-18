@@ -1,4 +1,6 @@
 #include "drive_ros_image_recognition/new_road_detection.h"
+#include <drive_ros_image_recognition/ImageToWorld.h>
+#include <drive_ros_image_recognition/WorldToImage.h>
 //#include <lms/imaging/warp.h>
 //#include <lms/math/curve.h>
 //#include <lms/imaging/graphics.h>
@@ -37,7 +39,9 @@ NewRoadDetection::NewRoadDetection(ros::NodeHandle nh, ros::NodeHandle pnh):
   conditionNewLine_(),
   conditionLineProcessed_(),
   current_image_(),
-  current_image_sobel_()
+  current_image_sobel_(),
+  worldToImageClient_(),
+  imageToWorldClient_()
 {
 }
 
@@ -101,6 +105,9 @@ bool NewRoadDetection::init() {
     debug_img_pub_ = nh_.advertise("/debug_image_out", 10);
 #endif
 
+    imageToWorldClient_ = pnh_.serviceClient<drive_ros_image_recognition::ImageToWorld>("ImageToWorld");
+    worldToImageClient_ = pnh_.serviceClient<drive_ros_image_recognition::WorldToImage>("WorldToImage");
+
     // todo: we have not decided on an interface for these debug channels yet
 //    debugAllPoints = writeChannel<lms::math::polyLine2f>("DEBUG_ALL_POINTS");
 //    debugValidPoints = writeChannel<lms::math::polyLine2f>("DEBUG_VALID_POINTS");
@@ -110,6 +117,44 @@ bool NewRoadDetection::init() {
 //    car = readChannel<street_environment::CarCommand>("CAR"); //TODO create ego-estimation service
 
     return true;
+}
+
+bool NewRoadDetection::imageToWorld(const cv::Point &image_point, cv::Point2f &world_point) {
+ drive_ros_image_recognition::ImageToWorld srv;
+ geometry_msgs::Point image_point_send;
+ image_point_send.x = image_point.x;
+ image_point_send.y = image_point.y;
+ image_point_send.z = 0.0;
+ srv.request.image_point = image_point_send;
+ if (imageToWorldClient_.call(srv))
+ {
+    world_point.x = srv.response.world_point.x;
+    world_point.y = srv.response.world_point.y;
+ }
+ else
+ {
+   ROS_ERROR("Failed to call service add_two_ints");
+   return false;
+ }
+}
+
+bool NewRoadDetection::worldToImage(const cv::Point2f &world_point, cv::Point &image_point) {
+  drive_ros_image_recognition::WorldToImage srv;
+  geometry_msgs::Point world_point_send;
+  world_point_send.x = world_point.x;
+  world_point_send.y = world_point.y;
+  world_point_send.z = 0.0;
+  srv.request.world_point = world_point_send;
+  if (worldToImageClient_.call(srv))
+  {
+     image_point.x = (int)srv.response.image_point.x;
+     image_point.y = (int)srv.response.image_point.y;
+  }
+  else
+  {
+    ROS_ERROR("Failed to call service add_two_ints");
+    return false;
+  }
 }
 
 void NewRoadDetection::roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& road_in_) {
@@ -288,9 +333,8 @@ std::vector<cv::Point2f> NewRoadDetection::findByBrightness( cv::LineIterator it
 
           //we found a valid point
           //get the middle
-          cv::Point2i mid = point_mid;
           cv::Point2f wMid;
-          imageToWorld(mid,wMid);
+          imageToWorld(point_mid,wMid);
           foundPoints.push_back(wMid);
         }
         tCounter = 0;
@@ -336,14 +380,16 @@ bool NewRoadDetection::find(){
         // todo: implement transformation functions from world to map and reversed
         // maybe this would be a good use for services (from the preprocessing node, has access to homography stuff anyway)
         int l_w_startx, l_w_starty, l_w_endx, l_w_endy;
-        worldToImage(l.w_start.x, l.w_start.y, l_w_startx, l_w_starty);
-        worldToImage(l.w_end.x, l.w_end.y, l_w_endx, l_w_endy);
+        cv::Point l_w_start;
+        cv::Point l_w_end;
+        worldToImage(l.w_start, l_w_start);
+        worldToImage(l.w_end, l_w_end);
         cv::Rect img_rect(cv::Point(),cv::Point(current_image_->cols,current_image_->rows));
-        if(!img_rect.contains(cv::Point(l_w_startx,l_w_starty))){
+        if(!img_rect.contains(l_w_start)){
             // try middle lane -> should always be in image
             l.w_start = mid[i];
-            worldToImage(l.w_start.x, l.w_start.y, l_w_startx, l_w_starty);
-            if(img_rect.contains(cv::Point(l_w_startx,l_w_starty))){
+            worldToImage(l.w_start, l_w_start);
+            if(img_rect.contains(l_w_start)){
                 continue;
             }
         }else if(!img_rect.contains(cv::Point(l_w_endx,l_w_endy))){
@@ -492,8 +538,10 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
         std::unique_lock<std::mutex> lock(debugValidPointsMutex);
         cv::namedWindow("Filtered Points", CV_WINDOW_NORMAL);
         cv::Mat filtered_points_mat = current_image_->clone();
+        cv::Point img_point;
         for (auto point : validPoints) {
-          cv::circle(filtered_points_mat, worldToImage(point), 2, cv::Scalar(255));
+          worldToImage(point, img_point);
+          cv::circle(filtered_points_mat, img_point, 2, cv::Scalar(255));
         }
         cv::imshow("Filtered Points", filtered_points_mat);
     }

@@ -125,6 +125,12 @@ class NewRoadDetection {
     void reconfigureCB(drive_ros_image_recognition::new_road_detectionConfig& config, uint32_t level);
     bool find();
 
+    ros::ServiceClient worldToImageClient_;
+    ros::ServiceClient imageToWorldClient_;
+
+    bool imageToWorld(const cv::Point &image_point, cv::Point2f &world_point);
+    bool worldToImage(const cv::Point2f &world_point, cv::Point &image_point);
+
     std::vector<cv::Point2f> findBySobel(cv::LineIterator it,
                      const float lineWidth,
                      const float iDist,

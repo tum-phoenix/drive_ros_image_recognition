@@ -13,15 +13,20 @@ find_package(catkin REQUIRED COMPONENTS
     sensor_msgs
     std_msgs
     dynamic_reconfigure
-#temp include to expedite transtition of new_road_detection -> todo: move to common message storage, not created yet
-    message_generation
     geometry_msgs
+    message_generation
 )
 
 add_message_files(
     FILES
     RoadLane.msg
     )
+
+add_service_files(
+  FILES
+  WorldToImage.srv
+  ImageToWorld.srv
+)
 
 generate_messages(
     DEPENDENCIES

@@ -6,6 +6,8 @@
 #include <sensor_msgs/image_encodings.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
+#include <drive_ros_image_recognition/ImageToWorld.h>
+#include <drive_ros_image_recognition/WorldToImage.h>
 
 namespace drive_ros_image_recognition {
 
@@ -16,6 +18,10 @@ public:
   bool init();
 private:
   void world_image_callback(const sensor_msgs::ImageConstPtr& msg);
+  bool worldToImage(drive_ros_image_recognition::WorldToImage::Request &req,
+                    drive_ros_image_recognition::WorldToImage::Response &res);
+  bool imageToWorld(drive_ros_image_recognition::ImageToWorld::Request  &req,
+                    drive_ros_image_recognition::ImageToWorld::Response &res);
   ros::NodeHandle pnh_;
   cv::Mat current_image_;
   // needs two components: camera model and homography for transformation
@@ -28,6 +34,10 @@ private:
   image_transport::ImageTransport it_;
   image_transport::Subscriber img_sub_;
   image_transport::Publisher img_pub_;
+  ros::ServiceServer worldToImageServer_;
+  ros::ServiceServer imageToWorldServer_;
+  // todo: move to using this in the future
+//  sensor_msgs::CameraInfo cam_info_;
 };
 
 } // namespace drive_ros_image_recognition
