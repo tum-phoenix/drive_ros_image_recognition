@@ -61,6 +61,15 @@ bool WarpContent::init() {
     // todo: check: according to warp_cpp.h, those two might actually be the other way round
     cam2world_.at<double>(i) = temp_vals[i];
   }
+//  world2cam_.at<double>(0,0) = temp_vals[0];
+//  world2cam_.at<double>(1,0) = temp_vals[1];
+//  world2cam_.at<double>(2,0) = temp_vals[2];
+//  world2cam_.at<double>(0,1) = temp_vals[3];
+//  world2cam_.at<double>(1,1) = temp_vals[4];
+//  world2cam_.at<double>(2,1) = temp_vals[5];
+//  world2cam_.at<double>(0,2) = temp_vals[6];
+//  world2cam_.at<double>(1,2) = temp_vals[7];
+//  world2cam_.at<double>(2,2) = temp_vals[8];
   ROS_INFO_STREAM("Cam2World loaded as: "<<cam2world_);
 
   // retreive camera model matrix for undistortion
@@ -129,12 +138,19 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg) {
     return;
   }
   // todo: extract required region from image, defined in the config, should be done in the camera
+//  cv::Rect roi(cv::Point(current_image_.cols/2-(410/2),0),cv::Point(current_image_.cols/2+(410/2),current_image_.rows));
+    cv::Rect roi(cv::Point(current_image_.cols/2-(410/2),0),cv::Point(current_image_.cols/2+(410/2),current_image_.rows));
+  current_image_ = current_image_(roi);
+  // scale homography?
+  cv::Mat S = cv::Mat::eye(3,3,CV_64F);
+  S.at<double>(0,0) = 410/current_image_.rows;
+  S.at<double>(1,1) = 752/current_image_.cols;
 
   // undistort and apply homography transformation
   cv::Mat undistorted_mat;
   cv::undistort(current_image_, undistorted_mat, cam_mat_, dist_coeffs_);
   undistort_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
-  cv::warpPerspective(undistorted_mat, undistorted_mat, world2cam_, current_image_.size());
+  cv::warpPerspective(undistorted_mat, undistorted_mat, S*cam2world_*S.inv(), current_image_.size());
   img_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
 }
 
@@ -153,6 +169,7 @@ bool WarpContent::worldToImage(drive_ros_image_recognition::WorldToImage::Reques
     ROS_WARN("Point transformed to image dimensions has invalid dimensions");
     return false;
   }
+
   res.image_point.x = point_image.at<double>(0,0);
   res.image_point.y = point_image.at<double>(1,0);
   res.image_point.z = 0.0;
