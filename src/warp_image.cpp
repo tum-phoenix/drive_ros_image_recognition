@@ -8,13 +8,14 @@ WarpContent::WarpContent(ros::NodeHandle& pnh):
   world2cam_(3,3,CV_64F,cv::Scalar(0.0)),
   cam2world_(3,3,CV_64F,cv::Scalar(0.0)),
   cam_mat_(3,3,CV_64F,cv::Scalar(0.0)),
-  dist_coeffs_(7,1,CV_64F,cv::Scalar(0.0)),
+  dist_coeffs_(8,1,CV_64F,cv::Scalar(0.0)),
   it_(pnh),
   img_sub_(),
   worldToImageServer_(),
   imageToWorldServer_()
 {
   img_pub_ = it_.advertise("warped_out", 1);
+  undistort_pub_ = it_.advertise("undistort_out", 1);
 }
 
 WarpContent::~WarpContent() {
@@ -32,8 +33,20 @@ bool WarpContent::init() {
     return false;
   }
   for(unsigned i=0; i < temp_vals.size(); i++) {
-    world2cam_.at<int>(i) = temp_vals[i];
+    // todo: check: according to warp_cpp.h, those two might actually be the other way round
+    world2cam_.at<double>(i) = temp_vals[i];
   }
+  // todo: if the index does not match opencv default
+//  world2cam_.at<double>(0,0) = temp_vals[0];
+//  world2cam_.at<double>(1,0) = temp_vals[1];
+//  world2cam_.at<double>(2,0) = temp_vals[2];
+//  world2cam_.at<double>(0,1) = temp_vals[3];
+//  world2cam_.at<double>(1,1) = temp_vals[4];
+//  world2cam_.at<double>(2,1) = temp_vals[5];
+//  world2cam_.at<double>(0,2) = temp_vals[6];
+//  world2cam_.at<double>(1,2) = temp_vals[7];
+//  world2cam_.at<double>(2,2) = temp_vals[8];
+  ROS_INFO_STREAM("World2cam loaded as: "<<world2cam_);
 
   temp_vals.clear();
   if (!pnh_.getParam("homography_matrix/cam2world", temp_vals)) {
@@ -45,8 +58,10 @@ bool WarpContent::init() {
     return false;
   }
   for(unsigned i=0; i < temp_vals.size(); i++) {
-     world2cam_.at<int>(i) = temp_vals[i];
+    // todo: check: according to warp_cpp.h, those two might actually be the other way round
+    cam2world_.at<double>(i) = temp_vals[i];
   }
+  ROS_INFO_STREAM("Cam2World loaded as: "<<cam2world_);
 
   // retreive camera model matrix for undistortion
   temp_vals.clear();
@@ -59,11 +74,16 @@ bool WarpContent::init() {
     return false;
   }
   // (row,column) indexing
-  cam_mat_.at<int>(0,0) = temp_vals[0];
-  cam_mat_.at<int>(1,1) = temp_vals[1];
-  cam_mat_.at<int>(0,2) = temp_vals[2];
-  cam_mat_.at<int>(1,2) = temp_vals[3];
-  cam_mat_.at<int>(2,2) = 1.0;
+  // Fx:
+  cam_mat_.at<double>(0,0) = temp_vals[0];
+  // Fy:
+  cam_mat_.at<double>(1,1) = temp_vals[1];
+  // Cx:
+  cam_mat_.at<double>(0,2) = temp_vals[2];
+  // Cy:
+  cam_mat_.at<double>(1,2) = temp_vals[3];
+  cam_mat_.at<double>(2,2) = 1.0;
+  ROS_INFO_STREAM("Camera matrix loaded as: "<<cam_mat_);
 
   // retreive distortion parameter vector for undistortion
   temp_vals.clear();
@@ -71,16 +91,24 @@ bool WarpContent::init() {
     ROS_ERROR("Unable to load distortion coefficient vector parameters from configuration file!");
     return false;
   }
-  if (temp_vals.size() != 5) {
-    ROS_ERROR("Retreived distortion coefficient vector does not have 5 values!");
+  if (temp_vals.size() != 6) {
+    ROS_ERROR("Retreived distortion coefficient vector does not have 6 values!");
     return false;
   }
   // (row,column) indexing
-  dist_coeffs_.at<int>(0,0) = temp_vals[0];
-  dist_coeffs_.at<int>(1,0) = temp_vals[1];
-  dist_coeffs_.at<int>(4,0) = temp_vals[2];
-  dist_coeffs_.at<int>(5,0) = temp_vals[3];
-  dist_coeffs_.at<int>(6,0) = temp_vals[4];
+  // K1
+  dist_coeffs_.at<double>(0,0) = temp_vals[0];
+  // K2
+  dist_coeffs_.at<double>(1,0) = temp_vals[1];
+  // K3
+  dist_coeffs_.at<double>(4,0) = temp_vals[2];
+  // K4
+  dist_coeffs_.at<double>(5,0) = temp_vals[3];
+  // K5
+  dist_coeffs_.at<double>(6,0) = temp_vals[4];
+  // K6
+  dist_coeffs_.at<double>(7,0) = temp_vals[5];
+  ROS_INFO_STREAM("Distortion coefficients loaded as: "<<dist_coeffs_);
 
   // initialize homography transformation subscriber
   img_sub_ = it_.subscribe("img_in", 10, &WarpContent::world_image_callback, this);
@@ -92,19 +120,22 @@ bool WarpContent::init() {
 void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg) {
   try
   {
-    // todo: check if this if we have 8 or 16 greyscale images
-    current_image_ = cv_bridge::toCvShare(msg, "mono16")->image;
+    // copy
+    current_image_ = cv_bridge::toCvCopy(msg, "")->image;
   }
   catch (cv_bridge::Exception& e)
   {
     ROS_WARN("Could not convert incoming image from '%s' to 'CV_16U', skipping.", msg->encoding.c_str());
     return;
   }
+  // todo: extract required region from image, defined in the config, should be done in the camera
 
   // undistort and apply homography transformation
-  cv::undistort(current_image_, current_image_, cam_mat_, dist_coeffs_);
-  cv::perspectiveTransform(current_image_, current_image_, world2cam_);
-  img_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), "mono16", current_image_).toImageMsg());
+  cv::Mat undistorted_mat;
+  cv::undistort(current_image_, undistorted_mat, cam_mat_, dist_coeffs_);
+  undistort_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
+  cv::warpPerspective(undistorted_mat, undistorted_mat, world2cam_, current_image_.size());
+  img_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
 }
 
 bool WarpContent::worldToImage(drive_ros_image_recognition::WorldToImage::Request &req,

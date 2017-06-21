@@ -34,6 +34,8 @@ private:
   image_transport::ImageTransport it_;
   image_transport::Subscriber img_sub_;
   image_transport::Publisher img_pub_;
+  // debug undistort publisher
+  image_transport::Publisher undistort_pub_;
   ros::ServiceServer worldToImageServer_;
   ros::ServiceServer imageToWorldServer_;
   // todo: move to using this in the future
