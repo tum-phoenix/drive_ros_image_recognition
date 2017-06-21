@@ -610,7 +610,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
     conditionLineProcessed_.notify_all();
 }
 
-void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::new_road_detectionConfig& config, uint32_t level){
+void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::NewRoadDetectionConfig& config, uint32_t level){
     searchOffset_ = config.searchOffset;
     findPointsBySobel_ = config.findBySobel;
     renderDebugImage_ = config.renderDebugImage;

@@ -8,7 +8,7 @@
 #include <image_transport/image_transport.h>
 #include <drive_ros_image_recognition/RoadLane.h>
 #include <dynamic_reconfigure/server.h>
-#include <drive_ros_image_recognition/new_road_detectionConfig.h>
+#include <drive_ros_image_recognition/NewRoadDetectionConfig.h>
 #include <drive_ros_image_recognition/geometry_common.h>
 //#include <lms/module.h>
 //#include <street_environment/road.h>
@@ -122,9 +122,9 @@ class NewRoadDetection {
     void roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& road_in_);
     void imageCallback(const sensor_msgs::ImageConstPtr& img_in);
 
-    dynamic_reconfigure::Server<drive_ros_image_recognition::new_road_detectionConfig> dsrv_server_;
-    dynamic_reconfigure::Server<drive_ros_image_recognition::new_road_detectionConfig>::CallbackType dsrv_cb_;
-    void reconfigureCB(drive_ros_image_recognition::new_road_detectionConfig& config, uint32_t level);
+    dynamic_reconfigure::Server<drive_ros_image_recognition::NewRoadDetectionConfig> dsrv_server_;
+    dynamic_reconfigure::Server<drive_ros_image_recognition::NewRoadDetectionConfig>::CallbackType dsrv_cb_;
+    void reconfigureCB(drive_ros_image_recognition::NewRoadDetectionConfig& config, uint32_t level);
     bool find();
 
     ros::ServiceClient worldToImageClient_;
