@@ -9,11 +9,13 @@
 #include <drive_ros_image_recognition/ImageToWorld.h>
 #include <drive_ros_image_recognition/WorldToImage.h>
 
+#include <nodelet/nodelet.h>
+
 namespace drive_ros_image_recognition {
 
 class WarpContent {
 public:
-  WarpContent(ros::NodeHandle& pnh);
+  WarpContent(const ros::NodeHandle& pnh);
   ~WarpContent();
   bool init();
 private:
@@ -40,6 +42,13 @@ private:
   ros::ServiceServer imageToWorldServer_;
   // todo: move to using this in the future
 //  sensor_msgs::CameraInfo cam_info_;
+};
+
+class WarpImageNodelet : public nodelet::Nodelet {
+public:
+    virtual void onInit();
+private:
+    std::unique_ptr<WarpContent> my_content_;
 };
 
 } // namespace drive_ros_image_recognition

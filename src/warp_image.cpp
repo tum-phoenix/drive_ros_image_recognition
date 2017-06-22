@@ -1,8 +1,9 @@
 #include <drive_ros_image_recognition/warp_image.h>
+#include <pluginlib/class_list_macros.h>
 
 namespace drive_ros_image_recognition {
 
-WarpContent::WarpContent(ros::NodeHandle& pnh):
+WarpContent::WarpContent(const ros::NodeHandle& pnh):
   pnh_(pnh),
   current_image_(),
   world2cam_(3,3,CV_64F,cv::Scalar(0.0)),
@@ -24,6 +25,7 @@ WarpContent::~WarpContent() {
 bool WarpContent::init() {
   // retrieve world2map and map2world homography matrices
   std::vector<double> temp_vals;
+
   if (!pnh_.getParam("homography_matrix/world2cam", temp_vals)) {
     ROS_ERROR("Unable to load world2cam homography matrix from configuration file!");
     return false;
@@ -36,17 +38,7 @@ bool WarpContent::init() {
     // todo: check: according to warp_cpp.h, those two might actually be the other way round
     world2cam_.at<double>(i) = temp_vals[i];
   }
-  // todo: if the index does not match opencv default
-//  world2cam_.at<double>(0,0) = temp_vals[0];
-//  world2cam_.at<double>(1,0) = temp_vals[1];
-//  world2cam_.at<double>(2,0) = temp_vals[2];
-//  world2cam_.at<double>(0,1) = temp_vals[3];
-//  world2cam_.at<double>(1,1) = temp_vals[4];
-//  world2cam_.at<double>(2,1) = temp_vals[5];
-//  world2cam_.at<double>(0,2) = temp_vals[6];
-//  world2cam_.at<double>(1,2) = temp_vals[7];
-//  world2cam_.at<double>(2,2) = temp_vals[8];
-  ROS_INFO_STREAM("World2cam loaded as: "<<world2cam_);
+  ROS_DEBUG_STREAM("World2cam loaded as: "<<world2cam_);
 
   temp_vals.clear();
   if (!pnh_.getParam("homography_matrix/cam2world", temp_vals)) {
@@ -61,16 +53,7 @@ bool WarpContent::init() {
     // todo: check: according to warp_cpp.h, those two might actually be the other way round
     cam2world_.at<double>(i) = temp_vals[i];
   }
-//  world2cam_.at<double>(0,0) = temp_vals[0];
-//  world2cam_.at<double>(1,0) = temp_vals[1];
-//  world2cam_.at<double>(2,0) = temp_vals[2];
-//  world2cam_.at<double>(0,1) = temp_vals[3];
-//  world2cam_.at<double>(1,1) = temp_vals[4];
-//  world2cam_.at<double>(2,1) = temp_vals[5];
-//  world2cam_.at<double>(0,2) = temp_vals[6];
-//  world2cam_.at<double>(1,2) = temp_vals[7];
-//  world2cam_.at<double>(2,2) = temp_vals[8];
-  ROS_INFO_STREAM("Cam2World loaded as: "<<cam2world_);
+  ROS_DEBUG_STREAM("Cam2World loaded as: "<<cam2world_);
 
   // retreive camera model matrix for undistortion
   temp_vals.clear();
@@ -92,7 +75,7 @@ bool WarpContent::init() {
   // Cy:
   cam_mat_.at<double>(1,2) = temp_vals[3];
   cam_mat_.at<double>(2,2) = 1.0;
-  ROS_INFO_STREAM("Camera matrix loaded as: "<<cam_mat_);
+  ROS_DEBUG_STREAM("Camera matrix loaded as: "<<cam_mat_);
 
   // retreive distortion parameter vector for undistortion
   temp_vals.clear();
@@ -117,7 +100,7 @@ bool WarpContent::init() {
   dist_coeffs_.at<double>(6,0) = temp_vals[4];
   // K6
   dist_coeffs_.at<double>(7,0) = temp_vals[5];
-  ROS_INFO_STREAM("Distortion coefficients loaded as: "<<dist_coeffs_);
+  ROS_DEBUG_STREAM("Distortion coefficients loaded as: "<<dist_coeffs_);
 
   // initialize homography transformation subscriber
   img_sub_ = it_.subscribe("img_in", 10, &WarpContent::world_image_callback, this);
@@ -137,41 +120,43 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg) {
     ROS_WARN("Could not convert incoming image from '%s' to 'CV_16U', skipping.", msg->encoding.c_str());
     return;
   }
-  // todo: extract required region from image, defined in the config, should be done in the camera
+
+  // optionally: scale homography, as image is too small
 //  cv::Rect roi(cv::Point(current_image_.cols/2-(410/2),0),cv::Point(current_image_.cols/2+(410/2),current_image_.rows));
-    cv::Rect roi(cv::Point(current_image_.cols/2-(410/2),0),cv::Point(current_image_.cols/2+(410/2),current_image_.rows));
-  current_image_ = current_image_(roi);
-  // scale homography?
-  cv::Mat S = cv::Mat::eye(3,3,CV_64F);
-  S.at<double>(0,0) = 410/current_image_.rows;
-  S.at<double>(1,1) = 752/current_image_.cols;
+//  current_image_ = current_image_(roi);
+//  cv::Mat S = cv::Mat::eye(3,3,CV_64F);
+//  S.at<double>(0,0) = 410/current_image_.rows;
+//  S.at<double>(1,1) = 752/current_image_.cols;
 
   // undistort and apply homography transformation
   cv::Mat undistorted_mat;
   cv::undistort(current_image_, undistorted_mat, cam_mat_, dist_coeffs_);
   undistort_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
-  cv::warpPerspective(undistorted_mat, undistorted_mat, S*cam2world_*S.inv(), current_image_.size());
-  img_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
+  // opionally: apply scaled homography
+  //  cv::warpPerspective(current_image_, current_image_, S*world2cam_*S.inv(), current_image_.size(),cv::WARP_INVERSE_MAP);
+
+  // flag ensures that we directly use the matrix, as it is done in LMS
+  cv::warpPerspective(current_image_, current_image_, world2cam_, current_image_.size(),cv::WARP_INVERSE_MAP);
 }
 
 bool WarpContent::worldToImage(drive_ros_image_recognition::WorldToImage::Request &req,
                                drive_ros_image_recognition::WorldToImage::Response &res)
 {
   ROS_DEBUG("WorldToImage service: transforming incoming world coordinates to image coordinates");
-  cv::Mat point_world = cv::Mat::zeros(3,1,CV_64F);
+  cv::Mat point_world(1,1,CV_64FC2);
   point_world.at<double>(0,0) = req.world_point.x;
-  point_world.at<double>(1,0) = req.world_point.y;
-  point_world.at<double>(2,0) = req.world_point.z;
+  point_world.at<double>(0,1) = req.world_point.y;
+  point_world.at<double>(0,2) = req.world_point.z;
 
-  cv::Mat point_image;
-  perspectiveTransform(point_world, point_image, world2cam_);
-  if (point_world.rows != 3 || point_world.cols != 1) {
+  cv::Mat point_image(1,1,CV_64FC2);
+  cv::perspectiveTransform(point_world, point_image, world2cam_);
+  if (point_world.rows != 1 || point_world.cols != 1) {
     ROS_WARN("Point transformed to image dimensions has invalid dimensions");
     return false;
   }
 
   res.image_point.x = point_image.at<double>(0,0);
-  res.image_point.y = point_image.at<double>(1,0);
+  res.image_point.y = point_image.at<double>(0,1);
   res.image_point.z = 0.0;
   // todo: move to sensor_msgs::CameraInfo for transformation, uses tf as base, could use as unified interface
   return true;
@@ -181,22 +166,31 @@ bool WarpContent::imageToWorld(drive_ros_image_recognition::ImageToWorld::Reques
                                drive_ros_image_recognition::ImageToWorld::Response &res)
 {
   ROS_DEBUG("WorldToImage service: transforming incoming image coordinates to world coordinates");
-  cv::Mat point_world = cv::Mat::zeros(3,1,CV_64F);
+  cv::Mat point_world(1,1,CV_64FC2);
   point_world.at<double>(0,0) = req.image_point.x;
-  point_world.at<double>(1,0) = req.image_point.y;
+  point_world.at<double>(0,1) = req.image_point.y;
 
-  cv::Mat point_image;
-  perspectiveTransform(point_world, point_image, cam2world_);
-  if (point_world.rows != 3 || point_world.cols != 1) {
+  cv::Mat point_image(1,1,CV_64FC2);
+  cv::perspectiveTransform(point_world, point_image, cam2world_);
+  if (point_world.rows != 1 || point_world.cols != 1) {
     ROS_WARN("Point transformed to world dimensions has invalid dimensions");
     return false;
   }
   res.world_point.x = point_image.at<double>(0,0);
-  res.world_point.y = point_image.at<double>(1,0);
-  res.world_point.z = point_image.at<double>(2,0);;
+  res.world_point.y = point_image.at<double>(0,1);
+  res.world_point.z = point_image.at<double>(0,2);
   // todo: move to sensor_msgs::CameraInfo for transformation, uses tf as base, could use as unified interface
   return true;
 }
 
+void WarpImageNodelet::onInit()
+{
+  my_content_.reset(new WarpContent(ros::NodeHandle("~")));
+  if (!my_content_->init()) {
+    ROS_ERROR("WarpImageNodelet failed to initialize!");
+  }
+}
+
 } // namespace drive_ros_image_recognition
 
+PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::WarpImageNodelet, nodelet::Nodelet)

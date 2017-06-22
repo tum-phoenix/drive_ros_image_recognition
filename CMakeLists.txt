@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
     dynamic_reconfigure
     geometry_msgs
     message_generation
+    nodelet
 )
 
 #include Boost for lane line processing
@@ -122,6 +123,30 @@ install(TARGETS warp_image_node
     ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
+# Warp image nodelet
+################################################################################
+add_library(warp_image_nodelet
+    src/warp_image.cpp
+    )
+
+add_dependencies(warp_image_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(warp_image_nodelet
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    )
+
+install(TARGETS warp_image_nodelet
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+install(FILES warp_image_nodelet.xml
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
     )
 
 ################################################################################
