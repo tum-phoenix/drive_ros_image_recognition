@@ -1,0 +1,20 @@
+<launch>
+    <arg name="camera_image_topic" default="/camera1/image_raw"/>
+    <arg name="warped_image_topic" default="/warped_image"/>
+    <!-- debug: undistored camera image (not warped) -->
+    <arg name="undistored_image_topic" default="/undistorted_image"/>
+
+    <!-- road trajectory -->
+    <arg name="road_trajectory_topic" default="/road_trajectory"/>
+
+    <include file="$(find drive_ros_image_recognition)/warp_image.launch">
+        <arg name="camera_image_topic" value="$(arg camera_image_topic)" />
+        <arg name="warped_image_topic" value="$(arg warped_image_topic)" />
+        <arg name="undistort_out" value="$(arg undistored_image_topic)" />
+    </include>
+
+    <include file="$(find drive_ros_image_recognition)/new_road_detection.launch">
+        <arg name="incoming_image" value="$(arg warped_image_topic)" />
+        <arg name="road_trajectory_topic" value="$(arg road_trajectory_topic)" />
+    </include>
+</launch>

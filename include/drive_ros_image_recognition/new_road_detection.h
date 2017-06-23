@@ -10,6 +10,8 @@
 #include <dynamic_reconfigure/server.h>
 #include <drive_ros_image_recognition/NewRoadDetectionConfig.h>
 #include <drive_ros_image_recognition/geometry_common.h>
+#include <nodelet/nodelet.h>
+
 //#include <lms/module.h>
 //#include <street_environment/road.h>
 //#include <street_environment/car.h>
@@ -48,6 +50,8 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
   return cv_ptr;
 }
 
+namespace drive_ros_image_recognition {
+
 /**
  * @brief Port of LMS module new_road_detection to ROS
  **/
@@ -66,7 +70,7 @@ class NewRoadDetection {
     int sobelThreshold_;
     int numThreads_; // 0 means single threaded
 
-    // todo: port this
+    // ported in the WarpImage class, ports the entire image already
 //    lms::imaging::Homography homo;
     //Datachannels
     // todo: we have not determined all interfaces yet, so will leave this in for now until we have figured it out
@@ -104,19 +108,20 @@ class NewRoadDetection {
     CvImagePtr current_image_;
     CvImagePtr current_image_sobel_;
 
+#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
     cv::Mat debug_image_;
+#endif
 
     image_transport::ImageTransport it_;
     image_transport::Subscriber img_sub_;
     // road inputs and outputs
     ros::Subscriber road_sub_;
     ros::Publisher line_output_pub_;
-#ifdef DRAW_DEBUG
+#ifdef PUBLISH_DEBUG
     image_transport::Publisher debug_img_pub_;
 #endif
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
-    std::string my_namespace_;
     drive_ros_image_recognition::RoadLane road_buffer_;
 
     void roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& road_in_);
@@ -147,9 +152,17 @@ class NewRoadDetection {
     void threadFunction();
 
 public:
-    NewRoadDetection(ros::NodeHandle nh, ros::NodeHandle pnh);
+    NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);
     ~NewRoadDetection();
     bool init();
 };
 
+class NewRoadDetectionNodelet: public nodelet::Nodelet {
+public:
+  virtual void onInit();
+private:
+  std::unique_ptr<NewRoadDetection> new_road_detection_;
+};
+
+}
 #endif // NEW_ROAD_DETECTION_H

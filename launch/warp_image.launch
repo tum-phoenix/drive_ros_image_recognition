@@ -1,7 +1,14 @@
 <launch>
+    <arg name="camera_image_topic" default="/camera1/image_raw"/>
+    <arg name="warped_image_topic" default="/warped_image"/>
+    <arg name="undistort_out" default="/undistorted_image"/>
+
     <node name="warp_image_node" pkg="drive_ros_image_recognition" type="warp_image_node" respawn="false" output="screen">
         <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
         <rosparam command="load" file="$(find drive_ros_image_recognition)/camera_matrix.yaml"/>
-        <remap from="~/img_in" to="/camera1/image_raw"/>
+        <remap from="~/img_in" to="$(arg camera_image_topic)"/>
+        <remap from="~/warped_out" to="$(arg warped_image_topic)"/>
+         <!-- debug: undistored camera image (not warped) -->
+        <remap from="~/undistort_out" to="$(arg undistort_out)"/>
     </node>
 </launch>

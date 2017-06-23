@@ -1,11 +1,33 @@
 <launch>
-  <node pkg="nodelet" type="nodelet" name="image_nodelet_manager"  args="manager" output="screen">
-      <!-- load into nodelet for now, handle in the class by passing nodelet plugin name later -->
-      <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
-      <rosparam command="load" file="$(find drive_ros_image_recognition)/camera_matrix.yaml"/>
-  </node>
+    <arg name="warp_nodelet_manager" default=""/>
 
-  <node pkg="nodelet" type="nodelet" name="WarpImageNodelet" args="load drive_ros_image_recognition/WarpImageNodelet image_nodelet_manager" output="screen">
-    <remap from="~/img_in" to="/camera1/image_raw"/>
-  </node>
+    <arg name="camera_image_topic" default="/camera1/image_raw"/>
+    <arg name="warped_image_topic" default="/warped_image"/>
+    <arg name="undistort_out" default="/undistorted_image"/>
+
+    <!-- if no manager provided, load it -->
+    <group if="$(eval arg('warp_nodelet_manager') == '')">
+        <node pkg="nodelet" type="nodelet" name="warp_nodelet_manager"  args="manager" output="screen"/>
+
+        <node pkg="nodelet" type="nodelet" name="warp_image_nodelet" args="load drive_ros_image_recognition/WarpImageNodelet warp_nodelet_manager" output="screen">
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/camera_matrix.yaml"/>
+            <remap from="~/img_in" to="$(arg camera_image_topic)"/>
+            <remap from="~/warped_out" to="$(arg warped_image_topic)"/>
+             <!-- debug: undistored camera image (not warped) -->
+            <remap from="~/undistort_out" to="$(arg undistort_out)"/>
+        </node>
+    </group>
+
+    <!-- use provided nodelet manager -->
+    <group unless="$(eval arg('warp_nodelet_manager') == '')">
+        <node pkg="nodelet" type="nodelet" name="warp_image_nodelet" args="load drive_ros_image_recognition/WarpImageNodelet $(arg warp_nodelet_manager)" output="screen">
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/camera_matrix.yaml"/>
+            <remap from="~/img_in" to="$(arg camera_image_topic)"/>
+            <remap from="~/warped_out" to="$(arg warped_image_topic)"/>
+             <!-- debug: undistored camera image (not warped) -->
+            <remap from="~/undistort_out" to="$(arg undistort_out)"/>
+        </node>
+    </group>
 </launch>

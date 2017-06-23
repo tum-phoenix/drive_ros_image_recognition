@@ -1,7 +1,0 @@
-<library path="lib/libwarp_image_nodelet">
-  <class name="drive_ros_image_recognition/WarpImageNodelet" type="drive_ros_image_recognition::WarpImageNodelet" base_class_type="nodelet::Nodelet">
-  <description>
-  Image warper nodelet.
-  </description>
-  </class>
-</library>

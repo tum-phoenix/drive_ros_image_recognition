@@ -4,6 +4,11 @@ project(drive_ros_image_recognition)
 #SET(CMAKE_BUILD_TYPE Release)
 SET(CMAKE_BUILD_TYPE Debug)
 
+# enable to compile with OpenCV window displays
+add_definitions(-DDRAW_DEBUG)
+# enable to compile with publishers of internally processed images
+add_definitions(-DPUBLISH_DEBUG)
+
 add_definitions(-std=c++11)
 
 find_package(catkin REQUIRED COMPONENTS
@@ -59,6 +64,7 @@ include_directories(
 ################################################################################
 # Line recognition node -> will leave this in for now, might be useful
 ################################################################################
+
 add_executable(line_recognition_node
     src/line_recognition_node.cpp
     src/line_recognition.cpp
@@ -80,25 +86,45 @@ install(TARGETS line_recognition_node
     )
 
 ################################################################################
-# New road detection (LMS port)
+# New road detection node (LMS port)
 ################################################################################
-# enable this to get debug publishing from the node
-#add_definitions(-DDRAW_DEBUG=True)
 
-add_executable(new_road_detection
+add_executable(new_road_detection_node
     src/new_road_detection.cpp
     src/new_road_detection_node.cpp
     )
 
-add_dependencies(new_road_detection ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(new_road_detection_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-target_link_libraries(new_road_detection
+target_link_libraries(new_road_detection_node
     ${catkin_LIBRARIES}
     ${OpenCV_LIBS}
     ${Boost_LIBRARIES}
     )
 
-install(TARGETS new_road_detection
+install(TARGETS new_road_detection_node
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
+# New road detection nodelet (LMS port)
+################################################################################
+
+add_library(new_road_detection_nodelet
+    src/new_road_detection.cpp
+    )
+
+add_dependencies(new_road_detection_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(new_road_detection_nodelet
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+    )
+
+install(TARGETS new_road_detection_nodelet
     ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -145,10 +171,6 @@ install(TARGETS warp_image_nodelet
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
     )
 
-install(FILES warp_image_nodelet.xml
-    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-    )
-
 ################################################################################
 # Image publisher node
 ################################################################################
@@ -172,6 +194,10 @@ install(TARGETS image_publisher_node
 ################################################################################
 # Install other files
 ################################################################################
+install(FILES nodelets.xml
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+    )
+
 install(DIRECTORY include/${PROJECT_NAME}/
     DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
     FILES_MATCHING PATTERN "*.h"

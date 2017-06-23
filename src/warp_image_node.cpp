@@ -10,6 +10,9 @@ int main(int argc, char** argv)
   if (!warp.init()) {
     return 1;
   }
+  else {
+    ROS_INFO("Warp_image node succesfully initialized");
+  }
 
 #ifndef NDEBUG
   // give GDB time to attach

@@ -6,9 +6,12 @@ int main(int argc, char** argv)
   ros::NodeHandle nh;
   ros::NodeHandle pnh("~");
 
-  NewRoadDetection new_road_detection(nh,pnh);
+  drive_ros_image_recognition::NewRoadDetection new_road_detection(nh,pnh);
   if (!new_road_detection.init()) {
     return 1;
+  }
+  else {
+    ROS_INFO("New road detection node succesfully initialized");
   }
 
 #ifndef NDEBUG
