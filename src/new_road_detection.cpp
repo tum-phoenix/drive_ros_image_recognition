@@ -406,6 +406,8 @@ bool NewRoadDetection::find(){
 
     //transform them in image-coordinates
     std::unique_lock<std::mutex> lock(mutex);
+    worldToImage(l.w_start,l.i_start);
+    worldToImage(l.w_end,l.i_end);
     lines_.push_back(l);
     linesToProcess_++;
 
