@@ -2,4 +2,4 @@
 geometry_msgs/Point image_point
 ---
 #point in world coordinates
-geometry_msgs/Point world_point
+geometry_msgs/PointStamped world_point

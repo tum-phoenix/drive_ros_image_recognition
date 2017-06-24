@@ -1,5 +1,5 @@
 #point in world coordinates
-geometry_msgs/Point world_point
+geometry_msgs/PointStamped world_point
 ---
 #point in image coordinates
 geometry_msgs/Point image_point

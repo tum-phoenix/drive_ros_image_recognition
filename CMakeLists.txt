@@ -14,6 +14,7 @@ add_definitions(-std=c++11)
 find_package(catkin REQUIRED COMPONENTS
     cv_bridge
     image_transport
+    image_geometry
     roscpp
     sensor_msgs
     std_msgs
@@ -21,6 +22,7 @@ find_package(catkin REQUIRED COMPONENTS
     geometry_msgs
     message_generation
     nodelet
+    tf
 )
 
 #include Boost for lane line processing

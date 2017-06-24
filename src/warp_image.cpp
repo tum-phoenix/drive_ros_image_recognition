@@ -11,9 +11,11 @@ WarpContent::WarpContent(const ros::NodeHandle& pnh):
   cam_mat_(3,3,CV_64F,cv::Scalar(0.0)),
   dist_coeffs_(8,1,CV_64F,cv::Scalar(0.0)),
   it_(pnh),
-  img_sub_(),
+  cam_sub_(),
   worldToImageServer_(),
-  imageToWorldServer_()
+  imageToWorldServer_(),
+  cam_model_(),
+  tf_listener_()
 {
   img_pub_ = it_.advertise("warped_out", 1);
   undistort_pub_ = it_.advertise("undistort_out", 1);
@@ -103,13 +105,14 @@ bool WarpContent::init() {
   ROS_DEBUG_STREAM("Distortion coefficients loaded as: "<<dist_coeffs_);
 
   // initialize homography transformation subscriber
-  img_sub_ = it_.subscribe("img_in", 10, &WarpContent::world_image_callback, this);
+  cam_sub_ = it_.subscribeCamera("img_in", 10, &WarpContent::world_image_callback, this);
   worldToImageServer_ = pnh_.advertiseService("WorldToImage", &WarpContent::worldToImage, this);
   imageToWorldServer_ = pnh_.advertiseService("ImageToWorld", &WarpContent::imageToWorld, this);
   return true;
 }
 
-void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg) {
+void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
+                                       const sensor_msgs::CameraInfoConstPtr& info_msg) {
   try
   {
     // copy
@@ -121,6 +124,8 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg) {
     return;
   }
 
+    cam_model_.fromCameraInfo(info_msg);
+
   // optionally: scale homography, as image is too small
 //  cv::Rect roi(cv::Point(current_image_.cols/2-(410/2),0),cv::Point(current_image_.cols/2+(410/2),current_image_.rows));
 //  current_image_ = current_image_(roi);
@@ -130,7 +135,7 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg) {
 
   // undistort and apply homography transformation
   cv::Mat undistorted_mat;
-  cv::undistort(current_image_, undistorted_mat, cam_mat_, dist_coeffs_);
+  cv::undistort(current_image_, undistorted_mat, cam_model_.fullProjectionMatrix(), cam_model_.distortionCoeffs());
   undistort_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
   // opionally: apply scaled homography
   //  cv::warpPerspective(current_image_, current_image_, S*world2cam_*S.inv(), current_image_.size(),cv::WARP_INVERSE_MAP);
@@ -143,45 +148,92 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg) {
 bool WarpContent::worldToImage(drive_ros_image_recognition::WorldToImage::Request &req,
                                drive_ros_image_recognition::WorldToImage::Response &res)
 {
-  ROS_DEBUG("WorldToImage service: transforming incoming world coordinates to image coordinates");
-  cv::Mat point_world(1,1,CV_64FC2);
-  point_world.at<double>(0,0) = req.world_point.x;
-  point_world.at<double>(0,1) = req.world_point.y;
-  point_world.at<double>(0,2) = req.world_point.z;
+//  ROS_DEBUG("WorldToImage service: transforming incoming world coordinates to image coordinates");
+//  cv::Mat point_world(1,1,CV_64FC2);
+//  point_world.at<double>(0,0) = req.world_point.x;
+//  point_world.at<double>(0,1) = req.world_point.y;
+//  point_world.at<double>(0,2) = req.world_point.z;
 
-  cv::Mat point_image(1,1,CV_64FC2);
-  cv::perspectiveTransform(point_world, point_image, world2cam_);
-  if (point_world.rows != 1 || point_world.cols != 1) {
-    ROS_WARN("Point transformed to image dimensions has invalid dimensions");
-    return false;
-  }
+  cv::Point3d world_point(req.world_point.point.x, req.world_point.point.y, req.world_point.point.z);
+  cv::Point2d world_point_cam = cam_model_.project3dToPixel(world_point);
 
-  res.image_point.x = point_image.at<double>(0,0);
-  res.image_point.y = point_image.at<double>(0,1);
+//  cv::Mat point_image(1,1,CV_64FC2);
+//  cv::perspectiveTransform(point_world, point_image, world2cam_);
+//  if (point_world.rows != 1 || point_world.cols != 1) {
+//    ROS_WARN("Point transformed to image dimensions has invalid dimensions");
+//    return false;
+//  }
+
+//  res.image_point.x = point_image.at<double>(0,0);
+//  res.image_point.y = point_image.at<double>(0,1);
+//  res.image_point.z = 0.0;
+
+  res.image_point.x = world_point_cam.x;
+  res.image_point.y = world_point_cam.y;
   res.image_point.z = 0.0;
-  // todo: move to sensor_msgs::CameraInfo for transformation, uses tf as base, could use as unified interface
+
   return true;
 }
 
 bool WarpContent::imageToWorld(drive_ros_image_recognition::ImageToWorld::Request  &req,
                                drive_ros_image_recognition::ImageToWorld::Response &res)
 {
-  ROS_DEBUG("WorldToImage service: transforming incoming image coordinates to world coordinates");
-  cv::Mat point_world(1,1,CV_64FC2);
-  point_world.at<double>(0,0) = req.image_point.x;
-  point_world.at<double>(0,1) = req.image_point.y;
+//  ROS_DEBUG("WorldToImage service: transforming incoming image coordinates to world coordinates");
+//  cv::Mat point_world(1,1,CV_64FC2);
+//  point_world.at<double>(0,0) = req.image_point.x;
+//  point_world.at<double>(0,1) = req.image_point.y;
 
-  cv::Mat point_image(1,1,CV_64FC2);
-  cv::perspectiveTransform(point_world, point_image, cam2world_);
-  if (point_world.rows != 1 || point_world.cols != 1) {
-    ROS_WARN("Point transformed to world dimensions has invalid dimensions");
-    return false;
-  }
-  res.world_point.x = point_image.at<double>(0,0);
-  res.world_point.y = point_image.at<double>(0,1);
-  res.world_point.z = point_image.at<double>(0,2);
-  // todo: move to sensor_msgs::CameraInfo for transformation, uses tf as base, could use as unified interface
-  return true;
+//  cv::Mat point_image(1,1,CV_64FC2);
+//  cv::perspectiveTransform(point_world, point_image, cam2world_);
+//  if (point_world.rows != 1 || point_world.cols != 1) {
+//    ROS_WARN("Point transformed to world dimensions has invalid dimensions");
+//    return false;
+//  }
+//  res.world_point.x = point_image.at<double>(0,0);
+//  res.world_point.y = point_image.at<double>(0,1);
+//  res.world_point.z = point_image.at<double>(0,2);
+//  // todo: move to sensor_msgs::CameraInfo for transformation, uses tf as base, could use as unified interface
+//  return true;
+
+  // assuming we are defining our road points in the middle from axis frame id
+//  geometry_msgs::PointStamped point_out;
+//  cv::Point2d image_point_;
+//  cv::Point3d world_point_;
+//  image_point_.x = req.image_point.x;
+//  image_point_.y = req.image_point.y;
+//  world_point_ = cam_model_.projectPixelTo3dRay(image_point_);
+//  cam_model_.
+    cv::Mat point_world(1,1,CV_64FC2);
+    point_world.at<double>(0,0) = req.image_point.x;
+    point_world.at<double>(0,1) = req.image_point.y;
+
+    cv::Mat point_image(1,1,CV_64FC2);
+    cv::perspectiveTransform(point_world, point_image, cam2world_);
+    if (point_world.rows != 1 || point_world.cols != 1) {
+        ROS_WARN("Point transformed to world dimensions has invalid dimensions");
+        return false;
+    }
+
+    // todo: check if this is valid
+    cv::Point3d cam_ray_point = cam_model_.projectPixelTo3dRay(cv::Point2d(point_image.at<double>(0,0),point_image.at<double>(0,1)));
+
+    geometry_msgs::PointStamped camera_point;
+    camera_point.header.frame_id = cam_model_.tfFrame();
+    camera_point.point.x = cam_ray_point.x;
+    camera_point.point.y = cam_ray_point.y;
+    camera_point.point.z = cam_ray_point.z;
+
+    try {
+        ros::Duration timeout(1.0 / 30);
+        tf_listener_.waitForTransform(cam_model_.tfFrame(), cam_model_.tfFrame(),
+                                      ros::Time::now(), timeout);
+        tf_listener_.transformPoint("tf_front_axis_middle", camera_point, res.world_point);
+    }
+    catch (tf::TransformException& ex) {
+        ROS_WARN("[ImageToWorld] TF exception, unable to transform:\n%s", ex.what());
+        return false;
+    }
+    return true;
 }
 
 void WarpImageNodelet::onInit()

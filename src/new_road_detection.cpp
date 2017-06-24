@@ -135,8 +135,8 @@ bool NewRoadDetection::imageToWorld(const cv::Point &image_point, cv::Point2f &w
   srv.request.image_point = image_point_send;
   if (imageToWorldClient_.call(srv))
   {
-    world_point.x = srv.response.world_point.x;
-    world_point.y = srv.response.world_point.y;
+    world_point.x = srv.response.world_point.point.x;
+    world_point.y = srv.response.world_point.point.y;
   }
   else
   {
@@ -147,10 +147,12 @@ bool NewRoadDetection::imageToWorld(const cv::Point &image_point, cv::Point2f &w
 
 bool NewRoadDetection::worldToImage(const cv::Point2f &world_point, cv::Point &image_point) {
   drive_ros_image_recognition::WorldToImage srv;
-  geometry_msgs::Point world_point_send;
-  world_point_send.x = world_point.x;
-  world_point_send.y = world_point.y;
-  world_point_send.z = 0.0;
+  geometry_msgs::PointStamped world_point_send;
+  world_point_send.point.x = world_point.x;
+  world_point_send.point.y = world_point.y;
+  world_point_send.point.z = 0.0;
+  // todo: check if this is valid, we assume the trajectory is defined in the axis reference frame
+  world_point_send.header.frame_id = "tf_front_axis_middle";
   srv.request.world_point = world_point_send;
   if (worldToImageClient_.call(srv))
   {

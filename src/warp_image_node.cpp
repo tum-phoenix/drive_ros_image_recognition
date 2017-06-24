@@ -6,7 +6,7 @@ int main(int argc, char** argv)
   ros::init(argc, argv, "warp_image_node");
   ros::NodeHandle nh("~");
 
-  drive_ros_image_recognition::WarpContent warp = drive_ros_image_recognition::WarpContent(nh);
+  drive_ros_image_recognition::WarpContent warp(nh);
   if (!warp.init()) {
     return 1;
   }
