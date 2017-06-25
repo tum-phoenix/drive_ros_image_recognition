@@ -37,6 +37,7 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
 #ifdef PUBLISH_DEBUG
   debug_img_pub_(),
   detected_points_pub_(),
+  filtered_points_pub_(),
 #endif
   dsrv_server_(),
   dsrv_cb_(boost::bind(&NewRoadDetection::reconfigureCB, this, _1, _2)),
@@ -113,6 +114,7 @@ bool NewRoadDetection::init() {
 #ifdef DRAW_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);
   detected_points_pub_ = it_.advertise("detected_points_out", 10);
+  filtered_points_pub_ = it_.advertise("filtered_points_out", 10);
 #endif
 
   imageToWorldClient_ = nh_.serviceClient<drive_ros_image_recognition::ImageToWorld>("/ImageToWorld");
@@ -397,15 +399,17 @@ bool NewRoadDetection::find(){
     worldToImage(l.w_start, l_w_start);
     worldToImage(l.w_end, l_w_end);
     cv::Rect img_rect(cv::Point(),cv::Point(current_image_->cols,current_image_->rows));
+    // if the left side is out of the current view, use middle instead
     if(!img_rect.contains(l_w_start)){
       // try middle lane -> should always be in image
-      l.w_start = cv::Point2f(bg::get<0>(*it_mid),bg::get<1>(*it_mid));
+      l.w_start = cv::Point2f(it_mid->x(),it_mid->y());
       worldToImage(l.w_start, l_w_start);
       if(img_rect.contains(l_w_start)){
         continue;
       }
+    // if the right side is out of the current view, use middle instead
     }else if(!img_rect.contains(l_w_end)){
-      l.w_end = cv::Point2f(bg::get<0>(*it_mid),bg::get<1>(*it_mid));
+      l.w_end = cv::Point2f(it_mid->x(),it_mid->y());
     }
 
     //transform them in image-coordinates
@@ -471,10 +475,11 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   //calculate the offset
   float iDist = cv::norm(l.i_end - l.i_start);
   float wDist = cv::norm(l.w_end - l.w_start);
-  //    float pxlPerDist = iDist/wDist*searchOffset_;
-  //    lms::math::vertex2f iDiff = lms::math::vertex2f(l.i_start-l.i_end).normalize();
-  //    lms::math::vertex2f startLine = lms::math::vertex2f(l.i_start)+iDiff*pxlPerDist;
-  //    lms::math::vertex2f endLine = lms::math::vertex2f(l.i_end)-iDiff*pxlPerDist;
+  // add search offset -> do not need this as we do it directly in the image
+//  float pxlPerDist = iDist/wDist*searchOffset_;
+//  cv::Point2f iDiff = (l.i_start-l.i_end)/norm(l.i_start-l.i_end);
+//  cv::Point2f startLine = cv::Point2f(l.i_start)+iDiff*pxlPerDist;
+//  cv::Point2f endLine = cv::Point2f(l.i_end)-iDiff*pxlPerDist;
   //    //get all points in between
   //    lms::math::bresenhamLine(startLine.x,startLine.y,endLine.x,endLine.y,xv,yv); //wir suchen von links nach rechts!
 
@@ -570,7 +575,12 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
       worldToImage(point, img_point);
       cv::circle(filtered_points_mat, img_point, 2, cv::Scalar(255));
     }
+#ifdef DRAW_DEBUG
     cv::imshow("Filtered Points", filtered_points_mat);
+#endif
+#ifdef PUBLISH_DEBUG
+    filtered_points_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, filtered_points_mat).toImageMsg());
+#endif
   }
 #endif
 
