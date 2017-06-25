@@ -17,7 +17,7 @@ namespace drive_ros_image_recognition {
 
 class WarpContent {
 public:
-  WarpContent(const ros::NodeHandle& pnh);
+  WarpContent(const ros::NodeHandle &nh, const ros::NodeHandle& pnh);
   ~WarpContent();
   bool init();
 private:
@@ -27,6 +27,7 @@ private:
   bool imageToWorld(drive_ros_image_recognition::ImageToWorld::Request  &req,
                     drive_ros_image_recognition::ImageToWorld::Response &res);
   ros::NodeHandle pnh_;
+  ros::NodeHandle nh_;
   cv::Mat current_image_;
   // needs two components: camera model and homography for transformation
   // homography matrices for transformation

@@ -119,6 +119,7 @@ class NewRoadDetection {
     ros::Publisher line_output_pub_;
 #ifdef PUBLISH_DEBUG
     image_transport::Publisher debug_img_pub_;
+    image_transport::Publisher detected_points_pub_;
 #endif
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;

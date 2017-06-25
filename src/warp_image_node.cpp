@@ -4,9 +4,10 @@
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "warp_image_node");
-  ros::NodeHandle nh("~");
+  ros::NodeHandle pnh("~");
+  ros::NodeHandle nh;
 
-  drive_ros_image_recognition::WarpContent warp(nh);
+  drive_ros_image_recognition::WarpContent warp(nh,pnh);
   if (!warp.init()) {
     return 1;
   }
@@ -16,7 +17,7 @@ int main(int argc, char** argv)
 
 #ifndef NDEBUG
   // give GDB time to attach
-  ros::Duration(1.0).sleep();
+  ros::Duration(2.0).sleep();
 #endif
 
   while (ros::ok()) {

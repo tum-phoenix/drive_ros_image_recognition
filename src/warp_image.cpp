@@ -3,7 +3,8 @@
 
 namespace drive_ros_image_recognition {
 
-WarpContent::WarpContent(const ros::NodeHandle& pnh):
+WarpContent::WarpContent(const ros::NodeHandle& nh, const ros::NodeHandle& pnh):
+  nh_(nh),
   pnh_(pnh),
   current_image_(),
   world2cam_(3,3,CV_64F,cv::Scalar(0.0)),
@@ -106,8 +107,8 @@ bool WarpContent::init() {
 
   // initialize homography transformation subscriber
   cam_sub_ = it_.subscribeCamera("img_in", 10, &WarpContent::world_image_callback, this);
-  worldToImageServer_ = pnh_.advertiseService("WorldToImage", &WarpContent::worldToImage, this);
-  imageToWorldServer_ = pnh_.advertiseService("ImageToWorld", &WarpContent::imageToWorld, this);
+  worldToImageServer_ = nh_.advertiseService("/WorldToImage", &WarpContent::worldToImage, this);
+  imageToWorldServer_ = nh_.advertiseService("/ImageToWorld", &WarpContent::imageToWorld, this);
   return true;
 }
 
@@ -135,7 +136,7 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
 
   // undistort and apply homography transformation
   cv::Mat undistorted_mat;
-  cv::undistort(current_image_, undistorted_mat, cam_model_.fullProjectionMatrix(), cam_model_.distortionCoeffs());
+  cv::undistort(current_image_, undistorted_mat, cam_model_.fullIntrinsicMatrix(), cam_model_.distortionCoeffs());
   undistort_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
   // opionally: apply scaled homography
   //  cv::warpPerspective(current_image_, current_image_, S*world2cam_*S.inv(), current_image_.size(),cv::WARP_INVERSE_MAP);
@@ -238,7 +239,7 @@ bool WarpContent::imageToWorld(drive_ros_image_recognition::ImageToWorld::Reques
 
 void WarpImageNodelet::onInit()
 {
-  my_content_.reset(new WarpContent(ros::NodeHandle(getPrivateNodeHandle())));
+  my_content_.reset(new WarpContent(getNodeHandle(),ros::NodeHandle(getPrivateNodeHandle())));
   if (!my_content_->init()) {
     ROS_ERROR("WarpImageNodelet failed to initialize!");
     // nodelet failing will kill the entire loader anyway

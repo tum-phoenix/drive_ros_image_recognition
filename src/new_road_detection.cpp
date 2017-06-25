@@ -27,7 +27,7 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   translateEnvironment_(false),
   useWeights_(false),
   renderDebugImage_(false),
-  numThreads_(4),
+  numThreads_(0),
   road_sub_(),
 #if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
   debug_image_(0,0,CV_16UC1),
@@ -36,6 +36,7 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   it_(pnh),
 #ifdef PUBLISH_DEBUG
   debug_img_pub_(),
+  detected_points_pub_(),
 #endif
   dsrv_server_(),
   dsrv_cb_(boost::bind(&NewRoadDetection::reconfigureCB, this, _1, _2)),
@@ -111,10 +112,11 @@ bool NewRoadDetection::init() {
 
 #ifdef DRAW_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);
+  detected_points_pub_ = it_.advertise("detected_points_out", 10);
 #endif
 
-  imageToWorldClient_ = pnh_.serviceClient<drive_ros_image_recognition::ImageToWorld>("ImageToWorld");
-  worldToImageClient_ = pnh_.serviceClient<drive_ros_image_recognition::WorldToImage>("WorldToImage");
+  imageToWorldClient_ = nh_.serviceClient<drive_ros_image_recognition::ImageToWorld>("/ImageToWorld");
+  worldToImageClient_ = nh_.serviceClient<drive_ros_image_recognition::WorldToImage>("/WorldToImage");
 
   // todo: we have not decided on an interface for these debug channels yet
   //    debugAllPoints = writeChannel<lms::math::polyLine2f>("DEBUG_ALL_POINTS");
@@ -140,7 +142,7 @@ bool NewRoadDetection::imageToWorld(const cv::Point &image_point, cv::Point2f &w
   }
   else
   {
-    ROS_ERROR("Failed to call service add_two_ints");
+    ROS_ERROR("Failed to call service ImageToWorld");
     return false;
   }
 }
@@ -161,7 +163,7 @@ bool NewRoadDetection::worldToImage(const cv::Point2f &world_point, cv::Point &i
   }
   else
   {
-    ROS_ERROR("Failed to call service add_two_ints");
+    ROS_ERROR("Failed to call service WorldToImage");
     return false;
   }
 }
@@ -485,6 +487,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
     // directly apply sobel operations on the image -> we only use the grad_x here as we only search horizontally
     // we perform order of 1 operations only
     // todo: check if CV_8UC1 is valid
+    current_image_sobel_.reset(new cv::Mat(current_image_->rows,current_image_->cols,CV_8UC1));
     cv::Sobel( *current_image_, *current_image_sobel_, CV_8UC1, 1, 0, 3, 1, 0, cv::BORDER_DEFAULT );
     // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
     foundPoints = findBySobel(it,0.02,iDist,wDist);
@@ -494,6 +497,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   }
 
   // draw unfiltered image points
+#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
   if(renderDebugImage_) {
     std::unique_lock<std::mutex> lock(debugAllPointsMutex);
     cv::namedWindow("Unfiltered points", CV_WINDOW_NORMAL);
@@ -501,8 +505,18 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
     for (auto point : foundPoints) {
       cv::circle(found_points_mat, point, 2, cv::Scalar(255));
     }
+    // draw search line
+    cv::line(found_points_mat, l.i_start, l.i_end, cv::Scalar(255));
+#ifdef DRAW_DEBUG
     cv::imshow("Unfiltered points", found_points_mat);
+    cv::waitKey(1);
+#endif
+
+#ifdef PUBLISH_DEBUG
+    detected_points_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, found_points_mat).toImageMsg());
+#endif
   }
+#endif
 
   //filter
   //TODO filter points that are in poluted regions (for example the car itself)
@@ -545,6 +559,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   }
 
   // draw filtered points
+#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
   if(renderDebugImage_) {
     // todo: make some more efficient storage method here, will translate back and forth here for now
     std::unique_lock<std::mutex> lock(debugValidPointsMutex);
@@ -557,6 +572,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
     }
     cv::imshow("Filtered Points", filtered_points_mat);
   }
+#endif
 
   //Handle found points
   cv::Point2f diff;
@@ -613,7 +629,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   //    }
 
   std::unique_lock<std::mutex> lock(mutex);
-  linesToProcess_ --;
+  linesToProcess_--;
   conditionLineProcessed_.notify_all();
 }
 

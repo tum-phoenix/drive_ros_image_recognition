@@ -9,5 +9,5 @@ new_road_detection:
     laneWidthOffsetInMeter: 0.1
     translateEnvironment: false
     useWeights: false
-    renderDebugImage: false
-    threads: 4
+    renderDebugImage: true
+    threads: 0
