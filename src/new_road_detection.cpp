@@ -265,9 +265,9 @@ std::vector<cv::Point2f> NewRoadDetection::findBySobel(cv::LineIterator it,
         //check if the points have the right distance
         float pxlPeakWidth = iDist/wDist*lineWidth; //TODO to bad, calculate for each road line (how should we use them for searching?
 
-        //logger.debug("")<<"crossing found highLow: "<<pxlCounter<<" "<<pxlPeakWidth;
-        //logger.debug("")<<"crossing found max: "<<pxlPeakWidth*maxLineWidthMul;
-        //logger.debug("")<<"crossing found min: "<<pxlPeakWidth*minLineWidthMul;
+        ROS_DEBUG_STREAM("crossing found highLow: "<<pxlCounter<<" "<<pxlPeakWidth);
+        ROS_DEBUG_STREAM("crossing found max: "<<pxlPeakWidth*maxLineWidthMul_);
+        ROS_DEBUG_STREAM("crossing found min: "<<pxlPeakWidth*minLineWidthMul_);
 
         // basically returns the middle of a line from multiple points, so will have to loop through the points here
         if(pxlCounter > pxlPeakWidth*minLineWidthMul_ && pxlCounter < pxlPeakWidth*maxLineWidthMul_){
@@ -279,7 +279,7 @@ std::vector<cv::Point2f> NewRoadDetection::findBySobel(cv::LineIterator it,
           cv::Point2f wMid;
           imageToWorld(it_backup.pos(),wMid);
           foundPoints.push_back(wMid);
-          //logger.debug("")<<"crossing FOUND VALID CROSSING";
+          ROS_DEBUG("crossing FOUND VALID CROSSING");
         }
       }
       pxlCounter = 0;
@@ -419,8 +419,7 @@ bool NewRoadDetection::find(){
     lines_.push_back(l);
     linesToProcess_++;
 
-    // todo: figure out what this does (no internet)
-    //        conditionNewLine.notify_one();
+    conditionNewLine_.notify_one();
   }
 
   if(numThreads_ == 0) {
