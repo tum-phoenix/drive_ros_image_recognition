@@ -194,6 +194,29 @@ install(TARGETS image_publisher_node
     )
 
 ################################################################################
+# Street crossing node (LMS port)
+################################################################################
+
+add_executable(street_crossing_node
+    src/street_crossing.cpp
+    src/street_crossing_node.cpp
+    )
+
+add_dependencies(street_crossing_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(street_crossing_node
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+    )
+
+install(TARGETS street_crossing_node
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
 # Install other files
 ################################################################################
 install(FILES nodelets.xml
