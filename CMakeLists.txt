@@ -63,29 +63,6 @@ include_directories(
     ${Boost_INCLUDE_DIRS}
     )
 
-################################################################################
-# Line recognition node -> will leave this in for now, might be useful
-################################################################################
-
-add_executable(line_recognition_node
-    src/line_recognition_node.cpp
-    src/line_recognition.cpp
-    src/edge_point.cpp
-#    src/line_point.cpp
-    )
-
-add_dependencies(line_recognition_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-target_link_libraries(line_recognition_node
-    ${catkin_LIBRARIES}
-    ${OpenCV_LIBS}
-    )
-
-install(TARGETS line_recognition_node
-    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-    )
 
 ################################################################################
 # New road detection node (LMS port)
