@@ -1,5 +1,5 @@
 #ifndef LINE_RECOGNITION_H
-#define LINE_RECOGNTION_H
+#define LINE_RECOGNITION_H
 
 #include <ros/ros.h>
 #include <sensor_msgs/image_encodings.h>
