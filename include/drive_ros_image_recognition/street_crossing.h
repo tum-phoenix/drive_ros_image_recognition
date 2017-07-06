@@ -9,7 +9,6 @@
 #include <image_transport/image_transport.h>
 
 #include "geometry_common.h"
-#include "image_object.h"
 #include "drive_ros_image_recognition/RoadLane.h"
 
 //#define DRAW_DEBUG

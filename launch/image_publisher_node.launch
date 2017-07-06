@@ -1,7 +1,0 @@
-<launch>
-    <node name="image_publisher_node" pkg="drive_ros_image_recognition" type="image_publisher_node" respawn="false" output="screen">
-        <param name="image_folder" type="string" value="/home/mykyta/Downloads/Images_0" />
-        <param name="publish_rate" type="double" value="10" />
-        <remap from="img_out" to="camera_image"/>
-    </node>
-</launch>
