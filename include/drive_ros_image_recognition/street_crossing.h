@@ -12,6 +12,8 @@
 #include "image_object.h"
 #include "drive_ros_image_recognition/RoadLane.h"
 
+//#define DRAW_DEBUG
+
 typedef boost::shared_ptr<cv::Mat> CvImagePtr;
 
 inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& imageIn) {
@@ -75,10 +77,10 @@ private:
     void roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& roadIn);
     void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
 
-    // help: how do publish debug points?
-#ifdef PUBLISH_DEBUG
-//    image_transport::Publisher debug_img_pub_;
-    image_transport::Publisher detectedPointsPublisher;
+#ifdef DRAW_DEBUG
+    image_transport::Publisher debugImagePublisher;
+    cv::Mat debugImage;
+//    image_transport::Publisher detectedPointsPublisher;
 #endif
 
     ros::ServiceClient worldToImageClient;
