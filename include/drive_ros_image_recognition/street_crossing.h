@@ -8,9 +8,11 @@
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 
-#include "geometry_common.h"
 #include "drive_ros_image_recognition/RoadLane.h"
 
+#define DRAW_DEUBG // todo: not very nice to define this here
+
+// todo: a lot of this stuff is used by new_road_detection too, so we should put this in a header / class
 typedef boost::shared_ptr<cv::Mat> CvImagePtr;
 
 inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& imageIn) {
@@ -53,40 +55,31 @@ private:
     int sobelThreshold;
     float minLineWidthMul;
     float maxLineWidthMul;
-    float lineWidth; // in m; todo: should be in config
+    float lineWidth; // todo: should be in config
 
     // variables
     std::vector<SearchLine> searchLines;
     CvImagePtr currentImage;
+    CvImagePtr currentSobelImage;
 
     // communication
     image_transport::ImageTransport imageTransport;
     image_transport::Subscriber imageSubscriber;
-    // road inputs and outputs
-    ros::Subscriber roadSubscriber;
-    ros::Publisher linePublisher;
 
-    drive_ros_image_recognition::RoadLane roadBuffer;
+//    ros::Publisher linePublisher;
 
     ros::NodeHandle nh;
     ros::NodeHandle pnh;
 
-    void roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& roadIn);
     void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
 
-    // help: how do publish debug points?
-#ifdef PUBLISH_DEBUG
-//    image_transport::Publisher debug_img_pub_;
-    image_transport::Publisher detectedPointsPublisher;
+#ifdef DRAW_DEUBG
+    image_transport::Publisher debugImagePublisher;
+    cv::Mat debugImage;
 #endif
 
-    ros::ServiceClient worldToImageClient;
-    ros::ServiceClient imageToWorldClient;
-    bool imageToWorld(const cv::Point &imagePoint, cv::Point2f &worldPoint);
-    bool worldToImage(const cv::Point2f &worldPoint, cv::Point &imagePoint);
-
     // methods
-    bool findStartline(/*linestring &middleLine*/);
+    bool findStartline();
     std::vector<cv::Point2f> processSearchLine(SearchLine &sl);
 
 public:
