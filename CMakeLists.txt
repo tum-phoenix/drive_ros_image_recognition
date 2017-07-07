@@ -159,7 +159,7 @@ add_executable(street_crossing_node
     src/street_crossing_node.cpp
     )
 
-add_dependencies(street_crossing_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(street_crossing_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(street_crossing_node
     ${catkin_LIBRARIES}
