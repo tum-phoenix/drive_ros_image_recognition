@@ -10,6 +10,7 @@
 
 #include "drive_ros_image_recognition/RoadLane.h"
 
+
 #define DRAW_DEUBG // todo: not very nice to define this here
 
 // todo: a lot of this stuff is used by new_road_detection too, so we should put this in a header / class
@@ -72,6 +73,7 @@ private:
     ros::NodeHandle pnh;
 
     void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
+
 
 #ifdef DRAW_DEUBG
     image_transport::Publisher debugImagePublisher;

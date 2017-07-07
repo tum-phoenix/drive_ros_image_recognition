@@ -72,14 +72,14 @@ bool StreetCrossingDetection::findStartline() {
   cv::line(debugImage, mySl.iStart, mySl.iEnd, cv::Scalar(255));
   debugImagePublisher.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, debugImage).toImageMsg());
 #endif
-
 }
 
-std::vector<cv::Point2f> StreetCrossingDetection::processSearchLine(SearchLine &sl) {
-  std::vector<cv::Point2f> foundPoints;
+    std::vector<cv::Point2f> StreetCrossingDetection::processSearchLine(SearchLine &sl) {
+      std::vector<cv::Point2f> foundPoints;
   bool foundLowHigh = false;
   int pxlCounter = 0;
   cv::Point2f iStartPxlPeak;
+
   cv::LineIterator lineIt(*currentSobelImage, sl.iStart, sl.iEnd);
   cv::Rect rect(0, 0, currentSobelImage->cols, currentSobelImage->rows);
   //  float iDist = cv::norm(sl.iEnd - sl.iStart);
@@ -88,12 +88,14 @@ std::vector<cv::Point2f> StreetCrossingDetection::processSearchLine(SearchLine &
   for(int i = 0; i < lineIt.count; i++, ++lineIt) {
     // safety check : is the point inside the image
     if(!rect.contains(lineIt.pos())){
+
       ROS_WARN("Received an invalid point outside the image to check for Sobel (%i,%i)", lineIt.pos().x, lineIt.pos().y);
       return foundPoints;
     }
 
     // Search for a bright pixel. Searching from bottom to top
     int sobel = currentSobelImage->at<char>(lineIt.pos());
+
     if(sobel > sobelThreshold) {
       // found low-high pass
       if(!foundLowHigh) {
