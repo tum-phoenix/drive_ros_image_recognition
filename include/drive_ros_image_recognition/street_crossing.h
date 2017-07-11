@@ -7,37 +7,35 @@
 #include <opencv2/imgproc.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
+#include <drive_ros_image_recognition/common_image_operations.h>
 
 #include "drive_ros_image_recognition/RoadLane.h"
 
-
-#define DRAW_DEUBG // todo: not very nice to define this here
-
 // todo: a lot of this stuff is used by new_road_detection too, so we should put this in a header / class
-typedef boost::shared_ptr<cv::Mat> CvImagePtr;
+//typedef boost::shared_ptr<cv::Mat> CvImagePtr;
 
-inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& imageIn) {
-  CvImagePtr cvPtr;
-  try
-  {
-    // hardcopies for now, might be possible to process on pointer if fast enough
-    // todo: make prettier
-    cv_bridge::CvImagePtr tmpPtr = cv_bridge::toCvCopy(*imageIn, "");
-    cvPtr.reset(new cv::Mat(tmpPtr->image) );
-  }
-  catch(cv_bridge::Exception& e)
-  {
-    ROS_ERROR("cv_bridge exception: %s", e.what());
-    return NULL;
-  }
+//inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& imageIn) {
+//  CvImagePtr cvPtr;
+//  try
+//  {
+//    // hardcopies for now, might be possible to process on pointer if fast enough
+//    // todo: make prettier
+//    cv_bridge::CvImagePtr tmpPtr = cv_bridge::toCvCopy(*imageIn, "");
+//    cvPtr.reset(new cv::Mat(tmpPtr->image) );
+//  }
+//  catch(cv_bridge::Exception& e)
+//  {
+//    ROS_ERROR("cv_bridge exception: %s", e.what());
+//    return NULL;
+//  }
 
-  if(!cvPtr->data)
-  {
-    ROS_WARN("Empty image received, skipping!");
-    return NULL;
-  }
-  return cvPtr;
-}
+//  if(!cvPtr->data)
+//  {
+//    ROS_WARN("Empty image received, skipping!");
+//    return NULL;
+//  }
+//  return cvPtr;
+//}
 
 namespace drive_ros_image_recognition {
 namespace detection {

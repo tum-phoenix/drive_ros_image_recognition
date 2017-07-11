@@ -5,9 +5,9 @@ project(drive_ros_image_recognition)
 SET(CMAKE_BUILD_TYPE Debug)
 
 # enable to compile with OpenCV window displays
-add_definitions(-DDRAW_DEBUG)
+#add_definitions(-DDRAW_DEBUG)
 # enable to compile with publishers of internally processed images
-add_definitions(-DPUBLISH_DEBUG)
+#add_definitions(-DPUBLISH_DEBUG)
 
 add_definitions(-std=c++11)
 
@@ -32,12 +32,6 @@ add_message_files(
     FILES
     RoadLane.msg
     )
-
-add_service_files(
-  FILES
-  WorldToImage.srv
-  ImageToWorld.srv
-)
 
 generate_messages(
     DEPENDENCIES

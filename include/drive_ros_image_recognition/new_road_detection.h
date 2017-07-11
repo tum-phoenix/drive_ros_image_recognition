@@ -4,51 +4,19 @@
 #include <ros/ros.h>
 #include <sensor_msgs/image_encodings.h>
 #include <cv_bridge/cv_bridge.h>
-#include <opencv2/highgui/highgui.hpp>
 #include <image_transport/image_transport.h>
 #include <drive_ros_image_recognition/RoadLane.h>
 #include <dynamic_reconfigure/server.h>
 #include <drive_ros_image_recognition/NewRoadDetectionConfig.h>
 #include <drive_ros_image_recognition/geometry_common.h>
+#include <drive_ros_image_recognition/common_image_operations.h>
 #include <nodelet/nodelet.h>
-
-//#include <lms/module.h>
-//#include <street_environment/road.h>
-//#include <street_environment/car.h>
-//#include <lms/imaging/transform_image.h>
-//#include <lms/imaging/image.h>
-
 #include <list>
 
 // for multithreading
 #include <mutex>
 #include <condition_variable>
 #include <thread>
-
-typedef boost::shared_ptr<cv::Mat> CvImagePtr;
-
-inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) {
-  CvImagePtr cv_ptr;
-  try
-  {
-    // hardcopies for now, might be possible to process on pointer if fast enough
-    // todo: make prettier
-    cv_bridge::CvImagePtr temp_ptr = cv_bridge::toCvCopy(*img_in, "");
-    cv_ptr.reset(new cv::Mat(temp_ptr->image) );
-  }
-  catch (cv_bridge::Exception& e)
-  {
-    ROS_ERROR("cv_bridge exception: %s", e.what());
-    return NULL;
-  }
-
-  if( !cv_ptr->data)
-  {
-    ROS_WARN("Empty image received, skipping!");
-    return NULL;
-  }
-  return cv_ptr;
-}
 
 namespace drive_ros_image_recognition {
 
@@ -82,18 +50,6 @@ class NewRoadDetection {
 //    lms::WriteDataChannel<lms::math::polyLine2f> debugValidPoints;
 //    lms::WriteDataChannel<lms::math::polyLine2f> debugTranslatedPoints;
 //    lms::ReadDataChannel<street_environment::CarCommand> car;
-
-    struct SearchLine{
-        cv::Point2f w_start;
-        cv::Point2f w_end;
-        cv::Point2i i_start;
-        cv::Point2i i_end;
-
-
-        cv::Point2f w_left;
-        cv::Point2f w_mid;
-        cv::Point2f w_right;
-    };
 
     std::list<SearchLine> lines_;
 
@@ -133,25 +89,10 @@ class NewRoadDetection {
     dynamic_reconfigure::Server<drive_ros_image_recognition::NewRoadDetectionConfig>::CallbackType dsrv_cb_;
     void reconfigureCB(drive_ros_image_recognition::NewRoadDetectionConfig& config, uint32_t level);
     bool find();
-
-    ros::ServiceClient worldToImageClient_;
-    ros::ServiceClient imageToWorldClient_;
-
-    bool imageToWorld(const cv::Point &image_point, cv::Point2f &world_point);
-    bool worldToImage(const cv::Point2f &world_point, cv::Point &image_point);
-
-    std::vector<cv::Point2f> findBySobel(cv::LineIterator it,
-                     const float lineWidth,
-                     const float iDist,
-                     const float wDist);
-
-    std::vector<cv::Point2f> findByBrightness(cv::LineIterator it,
-                                              const float lineWidth,
-                                              const float iDist,
-                                              const float wDist);
-
     void processSearchLine(const SearchLine &line);
     void threadFunction();
+    TransformHelper transform_helper_;
+    ImageOperator image_operator_;
 
 public:
     NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);
