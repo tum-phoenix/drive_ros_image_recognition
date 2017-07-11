@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(drive_ros_image_recognition)
 
-#SET(CMAKE_BUILD_TYPE Release)
-SET(CMAKE_BUILD_TYPE Debug)
+SET(CMAKE_BUILD_TYPE Release)
+#SET(CMAKE_BUILD_TYPE Debug)
 
 # enable to compile with OpenCV window displays
 add_definitions(-DDRAW_DEBUG)
