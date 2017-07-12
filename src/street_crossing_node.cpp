@@ -6,7 +6,7 @@ int main(int argc, char** argv)
   ros::NodeHandle nh;
   ros::NodeHandle pnh("~");
 
-  drive_ros_image_recognition::detection::StreetCrossingDetection streetCrossingDetection(nh, pnh);
+  drive_ros_image_recognition::StreetCrossingDetection streetCrossingDetection(nh, pnh);
   if (!streetCrossingDetection.init()) {
     return 1;
   }

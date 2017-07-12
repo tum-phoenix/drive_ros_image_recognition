@@ -62,7 +62,6 @@ class NewRoadDetection {
     bool threadsRunning_;
     int linesToProcess_;
     CvImagePtr current_image_;
-    CvImagePtr current_image_sobel_;
 
 #if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
     cv::Mat debug_image_;
@@ -70,6 +69,8 @@ class NewRoadDetection {
 
     image_transport::ImageTransport it_;
     image_transport::Subscriber img_sub_;
+    // for TransformHelper
+    ros::Subscriber cam_info_sub_;
     // road inputs and outputs
     ros::Subscriber road_sub_;
     ros::Publisher line_output_pub_;

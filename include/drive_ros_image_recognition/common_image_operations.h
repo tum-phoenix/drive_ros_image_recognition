@@ -7,6 +7,7 @@
 #include <geometry_msgs/PointStamped.h>
 #include <tf/transform_listener.h>
 #include <drive_ros_image_recognition/NewRoadDetectionConfig.h>
+#include <sensor_msgs/CameraInfo.h>
 
 typedef boost::shared_ptr<cv::Mat> CvImagePtr;
 
@@ -36,16 +37,21 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
 
 namespace drive_ros_image_recognition {
 
+inline void cam_info_sub(const sensor_msgs::CameraInfoConstPtr& incoming_cam_info, image_geometry::PinholeCameraModel& cam_model) {
+    cam_model.fromCameraInfo(incoming_cam_info);
+    ROS_INFO("Received camera info callback, processing for use in TransformHelper");
+}
+
 inline bool getHomographyMatParam(const ros::NodeHandle& pnh, cv::Mat mat, const std::string mat_param) {
     // retrieve world2map and map2world homography matrices
     std::vector<double> temp_vals;
 
     if (!pnh.getParam("homography_matrix/"+mat_param, temp_vals)) {
-      ROS_ERROR("Unable to load homography matrix from configuration file!");
+      ROS_ERROR("Unable to load homography matrix %s from configuration file!", mat_param.c_str());
       return false;
     }
     if (temp_vals.size() != 9) {
-      ROS_ERROR("Retreived homography matrix does not have 9 values!");
+      ROS_ERROR("Retreived homography matrix %s does not have 9 values", mat_param.c_str());
       return false;
     }
     for(unsigned i=0; i < temp_vals.size(); i++) {
@@ -82,10 +88,28 @@ public:
         world2cam_(),
     #endif
         cam_model_(),
-        cam2world_()
+        cam2world_(),
+        cam_info_sub_()
     {
     }
 
+    TransformHelper& operator=(TransformHelper&& other)
+    {
+        std::swap(cam_model_, other.cam_model_);
+        std::swap(cam2world_, other.cam2world_);
+        // tf listener also not swappable, should auto-initialize
+#ifdef USE_WORLD2CAM_HOMOGRAPHY
+        std::swap(world2cam_, other.world2cam_);
+#endif
+        // cannot swap subscriber, need to bind to new object
+        ros::NodeHandle nh;
+        cam_info_sub_ = nh.subscribe<sensor_msgs::CameraInfo>(other.cam_info_sub_.getTopic(), 1,
+                                                                boost::bind(&cam_info_sub, _1,
+                                                                            getCameraModelReference()) );
+        return *this;
+    }
+
+    // todo: properly reinitialize subscriber with new binding to this object
     TransformHelper(const TransformHelper& helper):
     tf_listener_()
     {
@@ -94,6 +118,10 @@ public:
         world2cam_ = helper.world2cam_;
 #endif
         cam_model_ = helper.cam_model_;
+        ros::NodeHandle nh;
+        cam_info_sub_ = nh.subscribe<sensor_msgs::CameraInfo>(helper.cam_info_sub_.getTopic(), 1,
+                                                              boost::bind(&cam_info_sub, _1,
+                                                                          getCameraModelReference()) );
     }
 
     TransformHelper(const cv::Mat& cam2world, const image_geometry::PinholeCameraModel& cam_model
@@ -106,11 +134,27 @@ public:
         world2cam_(world2cam),
     #endif
         cam_model_(cam_model),
-        tf_listener_()
+        tf_listener_(),
+        cam_info_sub_()
     {
     }
 
     ~TransformHelper() {
+    }
+
+    bool init(ros::NodeHandle& pnh) {
+#ifdef USE_WORLD2CAM_HOMOGRAPHY
+        if (!getHomographyMatParam(pnh, world2cam_, "world2cam"))
+            return false;
+#endif
+
+        if (!getHomographyMatParam(pnh, cam2world_, "cam2world"))
+            return false;
+
+        // subscribe Camera model to TransformHelper-> this is kind of hacky, but should keep the camera model on the transform helper updated
+        cam_info_sub_ = pnh.subscribe<sensor_msgs::CameraInfo>("/camera1/camera_info", 1,
+                                                                boost::bind(&cam_info_sub, _1,
+                                                                            getCameraModelReference()) );
     }
 
     void setCamModel(const image_geometry::PinholeCameraModel& cam_model) {
@@ -169,6 +213,21 @@ public:
         return true;
     }
 
+    void setcam2worldMat(const cv::Mat& cam2world) {
+        cam2world_ = cam2world;
+    }
+
+    // to subscribe to camerainfo messages
+    image_geometry::PinholeCameraModel& getCameraModelReference() {
+        return cam_model_;
+    }
+
+#ifdef USE_WORLD2CAM_HOMOGRAPHY
+    void setworld2camMat(const cv::Mat& world2cam) {
+        world2cam_ = world2cam;
+    }
+#endif
+
 private:
     image_geometry::PinholeCameraModel cam_model_;
     cv::Mat cam2world_;
@@ -176,83 +235,30 @@ private:
 #ifdef USE_WORLD2CAM_HOMOGRAPHY
     cv::Mat world2cam_;
 #endif
+    ros::Subscriber cam_info_sub_;
 }; // class TransformHelper
-
-//std::vector<cv::Point2f> processSearchLine(SearchLine &sl, const cv::Mat& current_image, const search_direction search_dir) {
-//    std::vector<cv::Point2f> foundPoints;
-//    bool foundLowHigh = false;
-//    int pxlCounter = 0;
-//    cv::Point2f iStartPxlPeak;
-
-//    cv::LineIterator it(*currentSobelImage, sl.iStart, sl.iEnd);
-
-//    found_points = findBySobel(lineIt, current_image, lineWidth_, iDist, wDist, search_dir);
-//    cv::Rect rect(0, 0, currentSobelImage->cols, currentSobelImage->rows);
-//    //  float iDist = cv::norm(sl.iEnd - sl.iStart);
-//    //  float wDist = cv::norm(sl.wEnd - sl.wStart);
-
-//    for(int i = 0; i < lineIt.count; i++, ++lineIt) {
-//        // safety check : is the point inside the image
-//        if(!rect.contains(lineIt.pos())){
-
-//            ROS_WARN("Received an invalid point outside the image to check for Sobel (%i,%i)", lineIt.pos().x, lineIt.pos().y);
-//            return foundPoints;
-//        }
-
-
-
-// Search for a bright pixel. Searching from bottom to top
-
-//        int sobel = currentSobelImage->at<char>(lineIt.pos());
-
-//        if(sobel > sobelThreshold) {
-//            // found low-high pass
-//            if(!foundLowHigh) {
-//                foundLowHigh = true;
-//                pxlCounter = 0;
-//                iStartPxlPeak.x = lineIt.pos().x;
-//                iStartPxlPeak.y = lineIt.pos().y;
-//            }
-//        } else if(sobel < -sobelThreshold) {
-//            // found high-low pass
-//            // check if we found a lowHigh + highLow border
-//            if(foundLowHigh){
-//                //check if the points have the right distance
-//                // TODO to bad, calculate for each road line (how should we use them for searching?
-//                // float pxlPeakWidth = iDist / wDist * lineWidth; // todo: understand this
-
-//                //logger.debug("")<<"crossing found highLow: "<<pxlCounter<<" "<<pxlPeakWidth;
-//                //logger.debug("")<<"crossing found max: "<<pxlPeakWidth*maxLineWidthMul;
-//                //logger.debug("")<<"crossing found min: "<<pxlPeakWidth*minLineWidthMul;
-
-//                // todo: check if the line we found has the correct height
-//                // if((pxlCounter > (pxlPeakWidth * minLineWidthMul)) && (pxlCounter < (pxlPeakWidth * maxLineWidthMul))) {
-//                // return the middle of the line we found
-//                // cv::Point2f iMid((iStartPxlPeak.x + lineIt.pos().x) *.5, (iStartPxlPeak.x + lineIt.pos().y) * .5);
-
-//                foundPoints.push_back(lineIt.pos());
-//                // cv::Point2f wMid;
-//                // imageToWorld(iMid, wMid);
-//                // foundPoints.push_back(wMid);
-//                // ROS_DEBUG("Found a stop-line");
-//                // }
-//            }
-//            pxlCounter = 0;
-//            foundLowHigh = false;
-//            // if not, we dont have to do anything
-//        }
-
-//        // for calculation of line width
-//        if(foundLowHigh){
-//            pxlCounter++;
-//        }
-//    }
-//    return foundPoints;
-//}
 
 class ImageOperator {
 
 public:
+
+    ImageOperator():
+        helper_()
+    {
+    }
+
+    ImageOperator(ImageOperator& image_operator):
+        helper_(image_operator.helper_),
+        config_(image_operator.config_)
+    {
+    }
+
+    ImageOperator& operator=(ImageOperator&& other)
+    {
+        std::swap(helper_, other.helper_);
+        std::swap(config_, other.config_);
+        return *this;
+    }
 
     ImageOperator(TransformHelper& helper):
         helper_(helper)
@@ -275,7 +281,7 @@ public:
         if (search_dir == search_direction::x)
             cv::Sobel( current_image, current_image_sobel, CV_8UC1, 1, 0, 3, 1, 0, cv::BORDER_DEFAULT );
         else if(search_dir == search_direction::y) {
-            // todo: in Simon's code this used a kernel size of 1 which did not really make sense, but check if this is valid anyway
+            // todo: check direction
             cv::Sobel( current_image, current_image_sobel, CV_8UC1, -1, 0, 3, 1, 0, cv::BORDER_DEFAULT);
         }
 
@@ -375,36 +381,38 @@ public:
             }else{
                 if(tCounter - k != 0 && tCounter > pxlPeakWidth*config_.minLineWidthMul && tCounter < pxlPeakWidth*config_.maxLineWidthMul){
                     for (int i = 0; i < tCounter; i++, ++it_debug) {
-                    }
-                    // get points for debug drawing on the way
-                    cv::Point point_first = it_debug.pos();
-                    for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
-                    }
-                    cv::Point point_mid = it_debug.pos();
-                    for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
-                    }
-                    cv::Point point_end = it_debug.pos();
-
 #ifdef DRAW_DEBUG
-                    if (config_.renderDebugImage) {
-                        cv::namedWindow("Line detected by brightness", CV_WINDOW_NORMAL);
-                        cv::Mat debug_image = current_image.clone();
+                        // get points for debug drawing on the way
+                        cv::Point point_first = it_debug.pos();
+#endif
+                        for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
+                        }
+                        cv::Point point_mid = it_debug.pos();
+#ifdef DRAW_DEBUG
+                        for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
+                        }
+                        cv::Point point_end = it_debug.pos();
 
-                        cv::line(debug_image, point_first, point_end, cv::Scalar(255));
-                        cv::imshow("Line detected by brightness", debug_image);
-                    }
+                        if (config_.renderDebugImage) {
+                            cv::namedWindow("Line detected by brightness", CV_WINDOW_NORMAL);
+                            cv::Mat debug_image = current_image.clone();
+
+                            cv::line(debug_image, point_first, point_end, cv::Scalar(255));
+                            cv::imshow("Line detected by brightness", debug_image);
+                        }
 #endif
 
-                    //we found a valid point
-                    //get the middle
-                    cv::Point2f wMid;
-                    helper_.imageToWorld(point_mid,wMid);
-                    foundPoints.push_back(wMid);
+                        //we found a valid point
+                        //get the middle
+                        cv::Point2f wMid;
+                        helper_.imageToWorld(point_mid,wMid);
+                        foundPoints.push_back(wMid);
+                    }
+                    tCounter = 0;
                 }
-                tCounter = 0;
             }
+            return foundPoints;
         }
-        return foundPoints;
     }
 
     void setConfig(const NewRoadDetectionConfig& config) {

@@ -39,10 +39,10 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   conditionNewLine_(),
   conditionLineProcessed_(),
   current_image_(),
-  current_image_sobel_(),
   road_buffer_(),
   transform_helper_(),
-  image_operator_(transform_helper_)
+  image_operator_(),
+  cam_info_sub_()
 {
 }
 
@@ -107,6 +107,9 @@ bool NewRoadDetection::init() {
   detected_points_pub_ = it_.advertise("detected_points_out", 10);
   filtered_points_pub_ = it_.advertise("filtered_points_out", 10);
 #endif
+
+  transform_helper_.init(pnh_);
+  image_operator_ = ImageOperator(transform_helper_);
 
   // todo: we have not decided on an interface for these debug channels yet
   //    debugAllPoints = writeChannel<lms::math::polyLine2f>("DEBUG_ALL_POINTS");
@@ -306,11 +309,6 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   std::vector<cv::Point2f> foundPoints;
   //find points
   if(findPointsBySobel_){
-    // directly apply sobel operations on the image -> we only use the grad_x here as we only search horizontally
-    // we perform order of 1 operations only
-    // todo: check if CV_8UC1 is valid
-    current_image_sobel_.reset(new cv::Mat(current_image_->rows,current_image_->cols,CV_8UC1));
-    cv::Sobel( *current_image_, *current_image_sobel_, CV_8UC1, 1, 0, 3, 1, 0, cv::BORDER_DEFAULT );
     // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
     foundPoints = image_operator_.findBySobel(l,*current_image_,0.02,iDist,wDist,search_direction::x);
   }else{
@@ -430,12 +428,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
     else
       weights.push_back(1);
   }
-  /*
-    if(renderDebugImage){
-        for(lms::math::vertex2f &v:foundPoints)
-            debugTranslatedPoints->points().push_back(v);
-    }
-    */
+
   // todo: check how this gets handled and adjust the interface
   drive_ros_image_recognition::RoadLane lane_out;
   lane_out.header.stamp = ros::Time::now();
@@ -448,12 +441,6 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   }
   lane_out.roadStateType = drive_ros_image_recognition::RoadLane::UNKNOWN;
   line_output_pub_.publish(lane_out);
-  //    lms::ServiceHandle<local_course::LocalCourse> localCourse = getService<local_course::LocalCourse>("LOCAL_COURSE_SERVICE");
-  //    if(localCourse.isValid()){
-  //        localCourse->addPoints(foundPoints,weights);
-  //    }else{
-  //        logger.error("localCourse invalid!");
-  //    }
 
   std::unique_lock<std::mutex> lock(mutex);
   linesToProcess_--;
@@ -461,6 +448,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
 }
 
 void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::NewRoadDetectionConfig& config, uint32_t level){
+  image_operator_.setConfig(config);
   searchOffset_ = config.searchOffset;
   findPointsBySobel_ = config.findBySobel;
   renderDebugImage_ = config.renderDebugImage;

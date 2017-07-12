@@ -38,18 +38,10 @@
 //}
 
 namespace drive_ros_image_recognition {
-namespace detection {
 
 class StreetCrossingDetection {
 
 private:
-    struct SearchLine{
-        cv::Point2f wStart;
-        cv::Point2f wEnd;
-        cv::Point2i iStart;
-        cv::Point2i iEnd;
-    };
-
     // configs
     int sobelThreshold;
     float minLineWidthMul;
@@ -82,6 +74,9 @@ private:
     bool findStartline();
     std::vector<cv::Point2f> processSearchLine(SearchLine &sl);
 
+    TransformHelper transform_helper_;
+    ImageOperator image_operator_;
+
 public:
     StreetCrossingDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);
     ~StreetCrossingDetection();
@@ -89,6 +84,5 @@ public:
 };
 
 } // namepsace drive_ros_image_recognition
-} // namespace detection
 
 #endif // STREET_CROSSING_H

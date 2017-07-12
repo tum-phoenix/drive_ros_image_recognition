@@ -25,11 +25,11 @@ WarpContent::~WarpContent() {
 }
 
 bool WarpContent::init() {
-//  if (!getHomographyMatParam(pnh_, world2cam_, "world2cam"))
-//      return false;
+  if (!getHomographyMatParam(pnh_, world2cam_, "world2cam"))
+      return false;
 
-//  if (!getHomographyMatParam(pnh_, cam2world_, "cam2world"))
-//      return false;
+  if (!getHomographyMatParam(pnh_, cam2world_, "cam2world"))
+      return false;
 
   // retreive camera model matrix for undistortion
   std::vector<double> temp_vals;

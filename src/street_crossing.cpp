@@ -5,7 +5,6 @@
 #include "drive_ros_image_recognition/street_crossing.h"
 
 namespace drive_ros_image_recognition {
-namespace detection {
 
 StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh_, const ros::NodeHandle pnh_)
   : nh(nh_)
@@ -15,6 +14,8 @@ StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh_, cons
   , minLineWidthMul(0.5)
   , maxLineWidthMul(2.0)
   , lineWidth(0.4)
+  , transform_helper_()
+  , image_operator_()
   #ifdef DRAW_DEBUG
   , debugImage(0, 0, CV_8UC1)
   #endif
@@ -32,6 +33,9 @@ bool StreetCrossingDetection::init() {
 #ifdef DRAW_DEBUG
   debugImagePublisher = imageTransport.advertise("/street_crossing/debug_image", 10);
 #endif
+
+  transform_helper_.init(pnh);
+  image_operator_ = ImageOperator(transform_helper_);
 
   return true;
 }
@@ -141,5 +145,4 @@ std::vector<cv::Point2f> StreetCrossingDetection::processSearchLine(SearchLine &
     return foundPoints;
 }
 
-} //namepsace detection
 } //namespace drive_ros_image_recognition
