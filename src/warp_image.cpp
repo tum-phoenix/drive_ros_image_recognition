@@ -31,54 +31,7 @@ bool WarpContent::init() {
   if (!getHomographyMatParam(pnh_, cam2world_, "cam2world"))
       return false;
 
-  // retreive camera model matrix for undistortion
-  std::vector<double> temp_vals;
-  if (!pnh_.getParam("camera_matrix/cam_mat", temp_vals)) {
-    ROS_ERROR("Unable to load camera matrix parameters from configuration file!");
-    return false;
-  }
-  if (temp_vals.size() != 4) {
-    ROS_ERROR("Retreived camera matrix does not have 4 values!");
-    return false;
-  }
-  // (row,column) indexing
-  // Fx:
-  cam_mat_.at<double>(0,0) = temp_vals[0];
-  // Fy:
-  cam_mat_.at<double>(1,1) = temp_vals[1];
-  // Cx:
-  cam_mat_.at<double>(0,2) = temp_vals[2];
-  // Cy:
-  cam_mat_.at<double>(1,2) = temp_vals[3];
-  cam_mat_.at<double>(2,2) = 1.0;
-  ROS_DEBUG_STREAM("Camera matrix loaded as: "<<cam_mat_);
-
-  // retreive distortion parameter vector for undistortion
-  temp_vals.clear();
-  if (!pnh_.getParam("camera_matrix/dist_coeffs", temp_vals)) {
-    ROS_ERROR("Unable to load distortion coefficient vector parameters from configuration file!");
-    return false;
-  }
-  if (temp_vals.size() != 6) {
-    ROS_ERROR("Retreived distortion coefficient vector does not have 6 values!");
-    return false;
-  }
-  // (row,column) indexing
-  // K1
-  dist_coeffs_.at<double>(0,0) = temp_vals[0];
-  // K2
-  dist_coeffs_.at<double>(1,0) = temp_vals[1];
-  // K3
-  dist_coeffs_.at<double>(4,0) = temp_vals[2];
-  // K4
-  dist_coeffs_.at<double>(5,0) = temp_vals[3];
-  // K5
-  dist_coeffs_.at<double>(6,0) = temp_vals[4];
-  // K6
-  dist_coeffs_.at<double>(7,0) = temp_vals[5];
-  ROS_DEBUG_STREAM("Distortion coefficients loaded as: "<<dist_coeffs_);
-
-  // initialize homography transformation subscriber
+  // initialize combined subscriber for camera image and model
   cam_sub_ = it_.subscribeCamera("img_in", 10, &WarpContent::world_image_callback, this);
   return true;
 }

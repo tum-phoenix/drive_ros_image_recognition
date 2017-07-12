@@ -8,6 +8,8 @@ SET(CMAKE_BUILD_TYPE Debug)
 #add_definitions(-DDRAW_DEBUG)
 # enable to compile with publishers of internally processed images
 #add_definitions(-DPUBLISH_DEBUG)
+# enable to use World2Cam homography
+#add_definitions(-DUSE_WORLD2CAM_HOMOGRAPHY)
 
 add_definitions(-std=c++11)
 

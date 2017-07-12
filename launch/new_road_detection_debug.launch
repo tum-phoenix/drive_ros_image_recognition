@@ -1,8 +1,9 @@
 <launch>
     <arg name="road_trajectory_topic" default="/road_trajectory"/>
-    <arg name="incoming_image" default="/camera1/image_raw"/>
+    <arg name="incoming_image" default="/undistorted_image"/>
 
     <node name="new_road_detection" pkg="drive_ros_image_recognition" type="new_road_detection_node" respawn="false" output="screen">
+        <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
         <remap from="~/img_in" to="$(arg incoming_image)"/>
         <remap from="~/road_in" to="$(arg road_trajectory_topic)"/>
         <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now

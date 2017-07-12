@@ -11,7 +11,6 @@
 
         <node pkg="nodelet" type="nodelet" name="warp_image_nodelet" args="load drive_ros_image_recognition/WarpImageNodelet warp_nodelet_manager" output="screen">
             <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/camera_matrix.yaml"/>
             <remap from="~/img_in" to="$(arg camera_image_topic)"/>
             <remap from="~/warped_out" to="$(arg warped_image_topic)"/>
              <!-- debug: undistored camera image (not warped) -->
@@ -23,7 +22,6 @@
     <group unless="$(eval arg('warp_nodelet_manager') == '')">
         <node pkg="nodelet" type="nodelet" name="warp_image_nodelet" args="load drive_ros_image_recognition/WarpImageNodelet $(arg warp_nodelet_manager)" output="screen">
             <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/camera_matrix.yaml"/>
             <remap from="~/img_in" to="$(arg camera_image_topic)"/>
             <remap from="~/warped_out" to="$(arg warped_image_topic)"/>
              <!-- debug: undistored camera image (not warped) -->

@@ -44,7 +44,7 @@ inline void cam_info_sub(const sensor_msgs::CameraInfoConstPtr& incoming_cam_inf
 
 inline bool getHomographyMatParam(const ros::NodeHandle& pnh, cv::Mat mat, const std::string mat_param) {
     // retrieve world2map and map2world homography matrices
-    std::vector<double> temp_vals;
+    std::vector<double> temp_vals(9);
 
     if (!pnh.getParam("homography_matrix/"+mat_param, temp_vals)) {
       ROS_ERROR("Unable to load homography matrix %s from configuration file!", mat_param.c_str());
@@ -55,7 +55,7 @@ inline bool getHomographyMatParam(const ros::NodeHandle& pnh, cv::Mat mat, const
       return false;
     }
     for(unsigned i=0; i < temp_vals.size(); i++) {
-      // todo: check: according to warp_cpp.h, those two might actually be the other way round
+      mat = cv::Mat::zeros(3,3,CV_64F);
       mat.at<double>(i) = temp_vals[i];
     }
     ROS_DEBUG_STREAM("Paramater matrix loaded as: "<<mat);
@@ -350,7 +350,9 @@ public:
 #endif
 
         // step4: get line thickness from image
+        // todo: handle cases with multiple line segments
         int line_thickness = (int)cv::sum(overlay_mat)[0];
+
 
         // step5: get midpoint of line
         cv::Mat locations;
