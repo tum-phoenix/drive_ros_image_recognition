@@ -52,17 +52,22 @@ bool StreetCrossingDetection::findStartline() {
   std::vector<cv::Point2f> linePoints;
   SearchLine mySl;
 
-  // Sobel
+  // Sobel -> will leave this in for now, even though we actually sobel two times like this
   currentSobelImage.reset(new cv::Mat(currentImage->rows, currentImage->cols, CV_8UC1));
   cv::Sobel(*currentImage, *currentSobelImage, -1, 0, 1);
 
   // use search-line to find stop-line
   mySl.iStart = cv::Point2f(currentImage->cols / 2, currentImage->rows * .8);
   mySl.iEnd = cv::Point2f(currentImage->cols / 2, currentImage->rows * .4);
-  // imageToWorld(mySl.iStart, mySl.wStart);
-  // imageToWorld(mySl.iEnd, mySl.wEnd);
+
   linePoints = processSearchLine(mySl);
 
+  // after we have a working calibration, we can simply use common helper function to check additional search lines after they have been generated
+//   transform_helper_.imageToWorld(mySl.iStart, mySl.wStart);
+//   transform_helper_.imageToWorld(mySl.iEnd, mySl.wEnd);
+//  float iDist = cv::norm(mySL.iEnd - l.iStart);
+//  float wDist = cv::norm(l.wEnd - l.wStart);
+//  foundPoints = image_operator_.findBySobel(mySl,*currentImage,0.02,iDist,wDist,search_direction::y);
 
   // Draw / publish points
 #ifdef DRAW_DEBUG
@@ -80,6 +85,7 @@ bool StreetCrossingDetection::findStartline() {
 
 std::vector<cv::Point2f> StreetCrossingDetection::processSearchLine(SearchLine &sl) {
     std::vector<cv::Point2f> foundPoints;
+
     bool foundLowHigh = false;
     int pxlCounter = 0;
     cv::Point2f iStartPxlPeak;

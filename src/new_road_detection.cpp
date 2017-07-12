@@ -304,8 +304,6 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   //    lms::math::bresenhamLine(startLine.x,startLine.y,endLine.x,endLine.y,xv,yv); //wir suchen von links nach rechts!
 
   // generate Bresenham search line
-  cv::LineIterator it(*current_image_,l.iStart,l.iEnd);
-
   std::vector<cv::Point2f> foundPoints;
   //find points
   if(findPointsBySobel_){
