@@ -67,6 +67,11 @@ enum search_direction {
     y = true
 };
 
+enum search_method {
+    sobel = false,
+    brightness = true
+};
+
 struct SearchLine{
     cv::Point2f wStart;
     cv::Point2f wEnd;
@@ -265,102 +270,40 @@ public:
     {
     }
 
-    std::vector<cv::Point2f> findBySobel(const SearchLine &sl,
+    std::vector<cv::Point2f> returnValidPoints(const SearchLine &sl,
                                          const cv::Mat& current_image,
                                          const float lineWidth,
-                                         const float iDist,
-                                         const float wDist,
-                                         const search_direction search_dir)
+                                         const search_direction search_dir,
+                                         const search_method method)
     {
+        std::vector<cv::Point> imagePoints;
+        std::vector<int> lineWidths;
         std::vector<cv::Point2f> foundPoints;
-        bool foundLowHigh = false;
-        int pxlCounter = 0;
-        cv::Mat current_image_sobel(current_image.rows,current_image.cols,CV_8UC1,cv::Scalar(0));
-        cv::LineIterator it(current_image_sobel, sl.iStart, sl.iEnd);
-        cv::LineIterator it_backup = it;
-        if (search_dir == search_direction::x)
-            cv::Sobel( current_image, current_image_sobel, CV_8UC1, 1, 0, 3, 1, 0, cv::BORDER_DEFAULT );
-        else if(search_dir == search_direction::y) {
-            // todo: check direction
-            cv::Sobel( current_image, current_image_sobel, CV_8UC1, -1, 0, 3, 1, 0, cv::BORDER_DEFAULT);
-        }
 
-        cv::Rect rect(cv::Point(),cv::Point(current_image.rows, current_image.cols));
+        float iDist = cv::norm(sl.iEnd - sl.iStart);
+        float wDist = cv::norm(sl.wEnd - sl.wStart);
+        float pxlPeakWidth = iDist/wDist*lineWidth;
+        findByLineSearch(sl, current_image, search_dir, method, imagePoints, lineWidths);
 
-        for(int i = 0; i < it.count; i++, ++it)
-        {
-            // safety check : is the point inside the image
-            if(!rect.contains(it.pos())){
-                ROS_WARN("Received an invalid point outside the image to check for Sobel");
-                return foundPoints;
-            }
+        cv::Point2f wMid;
 
-            //da wir von links nach rechts suchen ist positiver sobel ein dunkel-hell übergang
-            int sobel = (int)current_image_sobel.at<unsigned char>(it.pos().x,it.pos().y);
-            if(sobel > config_.sobelThreshold){
-                // found low-high pass (on the left side of the line)
-                if(!foundLowHigh){
-                    foundLowHigh = true;
-                    pxlCounter = 0;
-                }
-            }else if(sobel < -config_.sobelThreshold){ //hell-dunkel übergang
-                //check if we found a lowHigh + highLow border
-                if(foundLowHigh){
-                    //check if the points have the right distance
-                    float pxlPeakWidth = iDist/wDist*lineWidth; //TODO to bad, calculate for each road line (how should we use them for searching?
-
-                    ROS_DEBUG_STREAM("crossing found highLow: "<<pxlCounter<<" "<<pxlPeakWidth);
-                    ROS_DEBUG_STREAM("crossing found max: "<<pxlPeakWidth*config_.maxLineWidthMul);
-                    ROS_DEBUG_STREAM("crossing found min: "<<pxlPeakWidth*config_.minLineWidthMul);
-
-                    // basically returns the middle of a line from multiple points, so will have to loop through the points here
-                    if(pxlCounter > pxlPeakWidth*config_.minLineWidthMul && pxlCounter < pxlPeakWidth*config_.maxLineWidthMul){
-                        //we found a valid point
-                        //get the middle
-                        // todo: make this more elegant in both sobel and brightness (no std::advance for lineIterator)
-                        for (int iter = 0; iter<(i-pxlCounter/2); iter++, ++it_backup) {
-                        }
-                        cv::Point2f wMid;
-                        helper_.imageToWorld(it_backup.pos(),wMid);
-                        foundPoints.push_back(wMid);
-                        ROS_DEBUG("crossing FOUND VALID CROSSING");
-                    }
-                }
-                pxlCounter = 0;
-                foundLowHigh = false;
-                //if not, we dont have to do anything
-            }
-
-            // for calculation of line width
-            if(foundLowHigh){
-                pxlCounter++;
+        for (int i=0; i<imagePoints.size(); ++i) {
+            if (lineWidths[i] > pxlPeakWidth*config_.minLineWidthMul && lineWidths[i] < pxlPeakWidth*config_.maxLineWidthMul) {
+                helper_.imageToWorld(imagePoints[i], wMid);
+                foundPoints.push_back(wMid);
             }
         }
         return foundPoints;
     }
 
-    std::vector<cv::Point2f> findByBrightness( const SearchLine &sl,
-                                               const cv::Mat& current_image,
-                                               const float lineWidth,
-                                               const float iDist,
-                                               const float wDist,
-                                               const search_direction search_dir)
+    void findByLineSearch(const SearchLine& sl,
+                          const cv::Mat& current_image,
+                          const search_direction search_dir,
+                          const search_method search_meth,
+                          std::vector<cv::Point>& image_points,
+                          std::vector<int>& line_widths
+                          )
     {
-        std::vector<cv::Point2f> foundPoints;
-        std::vector<int> color;
-        cv::Rect rect(cv::Point(),cv::Point(current_image.rows, current_image.cols));
-        cv::LineIterator it(current_image, sl.iStart, sl.iEnd);
-        cv::LineIterator it_debug = it;
-
-        for(int i = 0; i < it.count; i++, ++it) {
-            // safety check : is the point inside the image
-            if(!rect.contains(it.pos())){
-                ROS_WARN("Received an invalid point outside the image to check for brightness");
-                color.push_back(0);
-                continue;
-            }
-            color.push_back(current_image.at<int>(it.pos().x,it.pos().y));
-
 #ifdef DRAW_DEBUG
             if (config_.renderDebugImage) {
                 cv::Mat debug_image = current_image.clone();
@@ -369,50 +312,102 @@ public:
                 cv::imshow("Unfiltered points processed by brightness search", debug_image);
             }
 #endif
-        }
 
-        //detect peaks
-        float pxlPeakWidth = iDist/wDist*lineWidth; //TODO to bad, calculate for each road line (how should we use them for searching?
-        int tCounter = 0;
-        // todo: make this more efficient
-        for(int k = 0; k < (int)color.size(); k++){
-            if(color[k]>config_.brightness_threshold){
-                tCounter++;
-            }else{
-                if(tCounter - k != 0 && tCounter > pxlPeakWidth*config_.minLineWidthMul && tCounter < pxlPeakWidth*config_.maxLineWidthMul){
-                    for (int i = 0; i < tCounter; i++, ++it_debug) {
-#ifdef DRAW_DEBUG
-                        // get points for debug drawing on the way
-                        cv::Point point_first = it_debug.pos();
-#endif
-                        for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
-                        }
-                        cv::Point point_mid = it_debug.pos();
-#ifdef DRAW_DEBUG
-                        for (int i = 0; i < (k-tCounter)/2; i++, ++it_debug) {
-                        }
-                        cv::Point point_end = it_debug.pos();
-
-                        if (config_.renderDebugImage) {
-                            cv::namedWindow("Line detected by brightness", CV_WINDOW_NORMAL);
-                            cv::Mat debug_image = current_image.clone();
-
-                            cv::line(debug_image, point_first, point_end, cv::Scalar(255));
-                            cv::imshow("Line detected by brightness", debug_image);
-                        }
-#endif
-
-                        //we found a valid point
-                        //get the middle
-                        cv::Point2f wMid;
-                        helper_.imageToWorld(point_mid,wMid);
-                        foundPoints.push_back(wMid);
-                    }
-                    tCounter = 0;
-                }
+        // step 1: threshold image with mat:
+        if (search_meth == search_method::brightness)
+            cv::threshold( current_image, current_image, config_.brightness_threshold, 255, CV_THRESH_BINARY );
+        else if (search_meth == search_method::sobel) {
+            if (search_dir == search_direction::x)
+                cv::Sobel( current_image, current_image, CV_8UC1, 1, 0, 3, 1, 0, cv::BORDER_DEFAULT );
+            else if(search_dir == search_direction::y) {
+                cv::Sobel( current_image, current_image, CV_8UC1, 0, 1, 3, 1, 0, cv::BORDER_DEFAULT);
             }
-            return foundPoints;
         }
+
+#ifdef DRAW_DEBUG
+        // thresholded image
+        if (config_.renderDebugImage) {
+            cv::Mat debug_image = current_image.clone();
+            cv::namedWindow("Thresholded image in brightness search", CV_WINDOW_NORMAL);
+            cv::circle(debug_image, it.pos(), 2, cv::Scalar(255));
+            cv::imshow("Thresholded image in brightness search", debug_image);
+        }
+#endif
+        // step 2: line mask to get only relevant pixels in search area
+        cv::Mat line_mat(current_image.rows, current_image.cols, CV_8UC1, cv::Scalar(0));
+        cv::line(line_mat, sl.iStart, sl.iEnd, cv::Scalar(255));
+
+        // step3: binary threshold with line mask
+        cv::Mat overlay_mat;
+        cv::bitwise_and(current_image, line_mat, overlay_mat);
+
+#ifdef DRAW_DEBUG
+        // line thresholded image
+        if (config_.renderDebugImage) {
+            cv::namedWindow("Line mask overlay", CV_WINDOW_NORMAL);
+            cv::imshow("Line mask overlay", overlay_mat);
+        }
+#endif
+
+        // step4: get line thickness from image
+        int line_thickness = (int)cv::sum(overlay_mat)[0];
+
+        // step5: get midpoint of line
+        cv::Mat locations;
+        cv::findNonZero(overlay_mat, locations);
+        double min, max;
+        if (search_dir == search_direction::x) {
+            cv::minMaxLoc(locations.col(0), &min, &max);
+        } else if (search_dir == search_direction::y) {
+            cv::minMaxLoc(locations.col(1), &min, &max);
+        }
+
+        if (search_dir == search_direction::x) {
+            line_widths.push_back(max-min);
+            image_points.push_back(cv::Point(min+line_thickness*0.5, sl.iStart.y));
+        } else if (search_dir == search_direction::y) {
+            line_widths.push_back(max-min);
+            image_points.push_back(cv::Point(sl.iStart.x,min+line_thickness*0.5));
+        }
+        return;
+    }
+
+    // debug to perform line check
+    void debugPointsImage (const cv::Mat& current_image,
+                           const search_direction search_dir,
+                           const search_method search_meth
+                           ) {
+        std::vector<cv::Point> image_points;
+        std::vector<int> image_widths;
+        cv::Mat debug_image;
+        cv::cvtColor(current_image, debug_image, CV_GRAY2RGB);
+
+        int search_steps = 5;
+        int pixel_step = 50;
+        SearchLine lines[search_steps];
+        for (int it = 0; it < search_steps*pixel_step; it+=pixel_step) {
+            if (search_dir == search_direction::x) {
+                lines[it].iStart = cv::Point(0,it*pixel_step);
+                lines[it].iEnd = cv::Point(current_image.rows, it*pixel_step);
+            } else if (search_dir == search_direction::y) {
+                lines[it].iStart = cv::Point(it*pixel_step, 0);
+                lines[it].iEnd = cv::Point(it*pixel_step, current_image.cols);
+            }
+            cv::line(debug_image, lines[it].iStart, lines[it].iEnd, cv::Scalar(0,255,0));
+            findByLineSearch(lines[it],
+                             current_image,
+                             search_dir,
+                             search_meth,
+                             image_points,
+                             image_widths
+                             );
+            for (auto point: image_points)
+                cv::circle(debug_image,point,2,cv::Scalar(255,0,0),2);
+        }
+        cv::namedWindow("Debug lineCheck", CV_WINDOW_NORMAL);
+        cv::imshow("Debug lineCheck", debug_image);
+        cv::waitKey(0);
+        return;
     }
 
     void setConfig(const NewRoadDetectionConfig& config) {

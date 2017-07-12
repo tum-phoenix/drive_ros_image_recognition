@@ -60,14 +60,26 @@ bool StreetCrossingDetection::findStartline() {
   mySl.iStart = cv::Point2f(currentImage->cols / 2, currentImage->rows * .8);
   mySl.iEnd = cv::Point2f(currentImage->cols / 2, currentImage->rows * .4);
 
-  linePoints = processSearchLine(mySl);
+//  linePoints = processSearchLine(mySl);
 
-  // after we have a working calibration, we can simply use common helper function to check additional search lines after they have been generated
-//   transform_helper_.imageToWorld(mySl.iStart, mySl.wStart);
-//   transform_helper_.imageToWorld(mySl.iEnd, mySl.wEnd);
-//  float iDist = cv::norm(mySL.iEnd - l.iStart);
-//  float wDist = cv::norm(l.wEnd - l.wStart);
-//  foundPoints = image_operator_.findBySobel(mySl,*currentImage,0.02,iDist,wDist,search_direction::y);
+  // test a single line
+  cv::Mat debug_image;
+  cv::cvtColor(*currentImage, debug_image, CV_GRAY2RGB);
+  search_direction search_dir = search_direction::y;
+  search_method search_meth = search_method::sobel;
+  std::vector<cv::Point> image_points;
+  std::vector<int> line_widths;
+  image_operator_.findByLineSearch(mySl,*currentImage,search_dir,search_meth,image_points,line_widths);
+  cv::line(debug_image, mySl.iStart, mySl.iEnd, cv::Scalar(0,255,0));
+  for (auto point: image_points) {
+        cv::circle(debug_image,point,2,cv::Scalar(0,0,255),2);
+  }
+  cv::namedWindow("Crossing Search debug",CV_WINDOW_NORMAL);
+  cv::imshow("Crossing Search debug",debug_image);
+  cv::waitKey(0);
+
+  // test array of lines
+  image_operator_.debugPointsImage(*currentImage, search_dir, search_meth);
 
   // Draw / publish points
 #ifdef DRAW_DEBUG

@@ -143,7 +143,10 @@ void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
 
   //if we have a road(?), try to find the line
   if(road_buffer_.points.size() > 1){
-    find(); //TODO use bool from find
+    //find(); //TODO use bool from find
+      search_direction search_dir = search_direction::x;
+      search_method search_meth = search_method::sobel;
+      image_operator_.debugPointsImage(*current_image_, search_dir, search_meth);
   } else {
     ROS_WARN("Road buffer has no points stored");
   }
@@ -289,12 +292,13 @@ void NewRoadDetection::threadFunction() {
 }
 
 void NewRoadDetection::processSearchLine(const SearchLine &l) {
-  std::vector<int> xv;
-  std::vector<int> yv;
+//  std::vector<int> xv;
+//  std::vector<int> yv;
 
   //calculate the offset
-  float iDist = cv::norm(l.iEnd - l.iStart);
-  float wDist = cv::norm(l.wEnd - l.wStart);
+  // done in search function
+//  float iDist = cv::norm(l.iEnd - l.iStart);
+//  float wDist = cv::norm(l.wEnd - l.wStart);
   // add search offset -> do not need this as we do it directly in the image
 //  float pxlPerDist = iDist/wDist*searchOffset_;
 //  cv::Point2f iDiff = (l.i_start-l.i_end)/norm(l.i_start-l.i_end);
@@ -303,15 +307,15 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   //    //get all points in between
   //    lms::math::bresenhamLine(startLine.x,startLine.y,endLine.x,endLine.y,xv,yv); //wir suchen von links nach rechts!
 
-  // generate Bresenham search line
   std::vector<cv::Point2f> foundPoints;
+
   //find points
   if(findPointsBySobel_){
     // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
-    foundPoints = image_operator_.findBySobel(l,*current_image_,0.02,iDist,wDist,search_direction::x);
+    foundPoints = image_operator_.returnValidPoints(l, *current_image_, 0.02, search_direction::x, search_method::sobel);
   }else{
     // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
-    foundPoints = image_operator_.findByBrightness(l,*current_image_,0.02,iDist,wDist,search_direction::y);
+    foundPoints = image_operator_.returnValidPoints(l, *current_image_, 0.02, search_direction::x, search_method::brightness);
   }
 
   // draw unfiltered image points
