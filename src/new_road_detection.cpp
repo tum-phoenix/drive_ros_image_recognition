@@ -6,7 +6,9 @@ namespace drive_ros_image_recognition {
 NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh):
   nh_(nh),
   pnh_(pnh),
-  img_sub_(),
+//  img_sub_(),
+//  road_sub_(),
+//  sync_(),
   searchOffset_(0.15),
   distanceBetweenSearchlines_(0.1),
   minLineWidthMul_(0.5),
@@ -19,10 +21,6 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   useWeights_(false),
   renderDebugImage_(false),
   numThreads_(0),
-  road_sub_(),
-#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-  debug_image_(0,0,CV_16UC1),
-#endif
   line_output_pub_(),
   it_(pnh),
 #ifdef PUBLISH_DEBUG
@@ -39,10 +37,10 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   conditionNewLine_(),
   conditionLineProcessed_(),
   current_image_(),
-  road_buffer_(),
+  road_points_buffer_(),
   transform_helper_(),
   image_operator_(),
-  cam_info_sub_()
+  img_sub_debug_()
 {
 }
 
@@ -98,11 +96,18 @@ bool NewRoadDetection::init() {
 
   dsrv_server_.setCallback(dsrv_cb_);
 
-  img_sub_ = it_.subscribe("img_in", 10, &NewRoadDetection::imageCallback, this);
-  road_sub_ = pnh_.subscribe("road_in", 100, &NewRoadDetection::roadCallback, this);
+  // to synchronize incoming images and the road, we use message filters
+//  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 1000));
+//  road_sub_.reset(new message_filters::Subscriber<RoadLane>(pnh_,"road_in", 1000));
+//  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(100), *img_sub_, *road_sub_));
+//  sync_->setAgePenalty(1.0);
+//  sync_->registerCallback(boost::bind(&NewRoadDetection::syncCallback, this, _1, _2));
+
+  img_sub_debug_ = it_.subscribe("img_in", 1000, &NewRoadDetection::debugImageCallback, this);
+
   line_output_pub_ = pnh_.advertise<drive_ros_image_recognition::RoadLane>("line_out",10);
 
-#ifdef DRAW_DEBUG
+#ifdef PUBLISH_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);
   detected_points_pub_ = it_.advertise("detected_points_out", 10);
   filtered_points_pub_ = it_.advertise("filtered_points_out", 10);
@@ -121,18 +126,18 @@ bool NewRoadDetection::init() {
   return true;
 }
 
-void NewRoadDetection::roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& road_in_) {
-  // use simple singular buffer
-  road_buffer_ = *road_in_;
+void NewRoadDetection::debugImageCallback(const sensor_msgs::ImageConstPtr& img_in) {
+  current_image_ = convertImageMessage(img_in);
+  // crop image to 410 width
+  cv::Rect roi(cv::Point(current_image_->cols/2-(410/2),0),cv::Point(current_image_->cols/2+(410/2),current_image_->rows));
+  search_direction search_dir = search_direction::x;
+  search_method search_meth = search_method::sobel;
+  image_operator_.debugPointsImage((*current_image_)(roi), search_dir, search_meth);
 }
 
-void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
+void NewRoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const RoadLaneConstPtr& road_in){
   current_image_ = convertImageMessage(img_in);
-#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-  if (renderDebugImage_) {
-    debug_image_ = current_image_->clone();
-  }
-#endif
+  road_points_buffer_ = road_in->points;
 
   // todo: adjust this time value
 //  if (img_in->header.stamp.toSec() - road_buffer_.header.stamp.toSec() > 0.1) {
@@ -142,14 +147,12 @@ void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
 //  }
 
   //if we have a road(?), try to find the line
-  if(road_buffer_.points.size() > 1){
-    //find(); //TODO use bool from find
-      search_direction search_dir = search_direction::x;
-      search_method search_meth = search_method::sobel;
-      image_operator_.debugPointsImage(*current_image_, search_dir, search_meth);
+  if(road_in->points.size() > 1){
+    find(); //TODO use bool from find
   } else {
     ROS_WARN("Road buffer has no points stored");
   }
+
 
 //  float dx = 0;
 //  float dy = 0;
@@ -182,7 +185,6 @@ void NewRoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
   //        ROS_ERROR("LocalCourse invalid, aborting the callback!");
   //        return;
   //    }
-  return;
 }
 
 bool NewRoadDetection::find(){
@@ -193,7 +195,7 @@ bool NewRoadDetection::find(){
 
   //create left/mid/right lane
   linestring mid, left, right;
-  for (auto point : road_buffer_.points) {
+  for (auto point : road_points_buffer_) {
     boost::geometry::append(mid,point_xy(point.x, point.y));
   }
   // simplify mid (previously done with distance-based algorithm

@@ -12,4 +12,4 @@ points:
 - x: 1.0
   y: 0.0
   z: 0.0
-roadStateType: 0" -r 10
+roadStateType: 0" -r 100

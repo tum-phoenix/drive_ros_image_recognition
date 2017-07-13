@@ -12,6 +12,10 @@
 #include <drive_ros_image_recognition/common_image_operations.h>
 #include <nodelet/nodelet.h>
 #include <list>
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <image_transport/subscriber_filter.h>
 
 // for multithreading
 #include <mutex>
@@ -62,17 +66,13 @@ class NewRoadDetection {
     bool threadsRunning_;
     int linesToProcess_;
     CvImagePtr current_image_;
-
-#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-    cv::Mat debug_image_;
-#endif
-
     image_transport::ImageTransport it_;
-    image_transport::Subscriber img_sub_;
-    // for TransformHelper
-    ros::Subscriber cam_info_sub_;
     // road inputs and outputs
-    ros::Subscriber road_sub_;
+    image_transport::Subscriber img_sub_debug_;
+//    std::unique_ptr<image_transport::SubscriberFilter> img_sub_;
+//    std::unique_ptr<message_filters::Subscriber<RoadLane> > road_sub_;
+//    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, RoadLane> SyncImageToRoad;
+//    std::unique_ptr<message_filters::Synchronizer<SyncImageToRoad> > sync_;
     ros::Publisher line_output_pub_;
 #ifdef PUBLISH_DEBUG
     image_transport::Publisher debug_img_pub_;
@@ -81,13 +81,12 @@ class NewRoadDetection {
 #endif
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
-    drive_ros_image_recognition::RoadLane road_buffer_;
-
-    void roadCallback(const drive_ros_image_recognition::RoadLaneConstPtr& road_in_);
-    void imageCallback(const sensor_msgs::ImageConstPtr& img_in);
+    std::vector<geometry_msgs::Point32> road_points_buffer_;
 
     dynamic_reconfigure::Server<drive_ros_image_recognition::NewRoadDetectionConfig> dsrv_server_;
     dynamic_reconfigure::Server<drive_ros_image_recognition::NewRoadDetectionConfig>::CallbackType dsrv_cb_;
+    void debugImageCallback(const sensor_msgs::ImageConstPtr& img_in);
+    void syncCallback(const sensor_msgs::ImageConstPtr& img_in, const RoadLaneConstPtr& road_in);
     void reconfigureCB(drive_ros_image_recognition::NewRoadDetectionConfig& config, uint32_t level);
     bool find();
     void processSearchLine(const SearchLine &line);

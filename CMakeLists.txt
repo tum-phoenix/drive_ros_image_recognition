@@ -5,7 +5,7 @@ project(drive_ros_image_recognition)
 SET(CMAKE_BUILD_TYPE Debug)
 
 # enable to compile with OpenCV window displays
-#add_definitions(-DDRAW_DEBUG)
+add_definitions(-DDRAW_DEBUG)
 # enable to compile with publishers of internally processed images
 #add_definitions(-DPUBLISH_DEBUG)
 # enable to use World2Cam homography
@@ -25,6 +25,7 @@ find_package(catkin REQUIRED COMPONENTS
     message_generation
     nodelet
     tf
+    message_filters
 )
 
 #include Boost for lane line processing

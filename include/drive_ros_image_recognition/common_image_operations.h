@@ -17,8 +17,9 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
     {
         // hardcopies for now, might be possible to process on pointer if fast enough
         // todo: make prettier
-        cv_bridge::CvImagePtr temp_ptr = cv_bridge::toCvCopy(*img_in, "");
-        cv_ptr.reset(new cv::Mat(temp_ptr->image) );
+//        cv_bridge::CvImagePtr temp_ptr = cv_bridge::toCvCopy(img_in, "");
+      cv_ptr.reset(new cv::Mat(cv_bridge::toCvCopy(img_in, "")->image.clone()));
+//        cv_ptr.reset(new cv::Mat(temp_ptr->image.clone()));
     }
     catch (cv_bridge::Exception& e)
     {
@@ -39,7 +40,6 @@ namespace drive_ros_image_recognition {
 
 inline void cam_info_sub(const sensor_msgs::CameraInfoConstPtr& incoming_cam_info, image_geometry::PinholeCameraModel& cam_model) {
     cam_model.fromCameraInfo(incoming_cam_info);
-    ROS_INFO("Received camera info callback, processing for use in TransformHelper");
 }
 
 inline bool getHomographyMatParam(const ros::NodeHandle& pnh, cv::Mat mat, const std::string mat_param) {
@@ -107,10 +107,11 @@ public:
         std::swap(world2cam_, other.world2cam_);
 #endif
         // cannot swap subscriber, need to bind to new object
-        ros::NodeHandle nh;
-        cam_info_sub_ = nh.subscribe<sensor_msgs::CameraInfo>(other.cam_info_sub_.getTopic(), 1,
+        ros::NodeHandle pnh("~");
+        cam_info_sub_ = pnh.subscribe<sensor_msgs::CameraInfo>("/camera1/camera_info", 1,
                                                                 boost::bind(&cam_info_sub, _1,
                                                                             getCameraModelReference()) );
+        other.cam_info_sub_.shutdown();
         return *this;
     }
 
@@ -123,8 +124,8 @@ public:
         world2cam_ = helper.world2cam_;
 #endif
         cam_model_ = helper.cam_model_;
-        ros::NodeHandle nh;
-        cam_info_sub_ = nh.subscribe<sensor_msgs::CameraInfo>(helper.cam_info_sub_.getTopic(), 1,
+        ros::NodeHandle pnh("~");
+        cam_info_sub_ = pnh.subscribe<sensor_msgs::CameraInfo>("/camera1/camera_info", 1,
                                                               boost::bind(&cam_info_sub, _1,
                                                                           getCameraModelReference()) );
     }
@@ -304,33 +305,27 @@ public:
                           std::vector<int>& line_widths
                           )
     {
-#ifdef DRAW_DEBUG
-            if (config_.renderDebugImage) {
-                cv::Mat debug_image = current_image.clone();
-                cv::namedWindow("Unfiltered points processed by brightness search", CV_WINDOW_NORMAL);
-                cv::circle(debug_image, it.pos(), 2, cv::Scalar(255));
-                cv::imshow("Unfiltered points processed by brightness search", debug_image);
-            }
-#endif
 
         // step 1: threshold image with mat:
         if (search_meth == search_method::brightness)
             cv::threshold( current_image, current_image, config_.brightness_threshold, 255, CV_THRESH_BINARY );
         else if (search_meth == search_method::sobel) {
             if (search_dir == search_direction::x)
-                cv::Sobel( current_image, current_image, CV_8UC1, 1, 0, 3, 1, 0, cv::BORDER_DEFAULT );
+                cv::Sobel( current_image, current_image, CV_8UC1, 1, 0, 1, 1, 0, cv::BORDER_DEFAULT );
             else if(search_dir == search_direction::y) {
-                cv::Sobel( current_image, current_image, CV_8UC1, 0, 1, 3, 1, 0, cv::BORDER_DEFAULT);
+                cv::Sobel( current_image, current_image, CV_8UC1, 0, 1, 1, 1, 0, cv::BORDER_DEFAULT);
             }
         }
 
 #ifdef DRAW_DEBUG
-        // thresholded image
-        if (config_.renderDebugImage) {
-            cv::Mat debug_image = current_image.clone();
-            cv::namedWindow("Thresholded image in brightness search", CV_WINDOW_NORMAL);
-            cv::circle(debug_image, it.pos(), 2, cv::Scalar(255));
-            cv::imshow("Thresholded image in brightness search", debug_image);
+        // display initial image
+        cv::Mat debug_image = current_image.clone();
+        if (search_meth == search_method::brightness) {
+          cv::namedWindow("Thresholded image in brightness search", CV_WINDOW_NORMAL);
+          cv::imshow("Thresholded image in brightness search", debug_image);
+        } else if (search_meth == search_method::sobel) {
+          cv::namedWindow("Sobel image in line search", CV_WINDOW_NORMAL);
+          cv::imshow("Sobel image in line search", debug_image);
         }
 #endif
         // step 2: line mask to get only relevant pixels in search area
@@ -340,37 +335,67 @@ public:
         // step3: binary threshold with line mask
         cv::Mat overlay_mat;
         cv::bitwise_and(current_image, line_mat, overlay_mat);
+//        cv::Mat upper_thresh;
+//        cv::threshold(overlay_mat(cv::Rect(cv::Point(sl.iStart.x,sl.iStart.y),cv::Point(sl.iEnd.x,sl.iEnd.y+1))),
+//                      upper_thresh, config_.sobelThreshold, 255, CV_THRESH_BINARY);
+//        cv::Mat lower_thresh;
+//        cv::threshold(overlay_mat(cv::Rect(cv::Point(sl.iStart.x,sl.iStart.y),cv::Point(sl.iEnd.x,sl.iEnd.y+1))),
+//                      lower_thresh, -config_.sobelThreshold, 255, CV_THRESH_BINARY);
+//        lower_thresh = upper_thresh + lower_thresh;
 
 #ifdef DRAW_DEBUG
         // line thresholded image
-        if (config_.renderDebugImage) {
-            cv::namedWindow("Line mask overlay", CV_WINDOW_NORMAL);
-            cv::imshow("Line mask overlay", overlay_mat);
-        }
+        cv::namedWindow("Line mask overlay", CV_WINDOW_NORMAL);
+        cv::imshow("Line mask overlay", overlay_mat);
+//        cv::threshold(overlay_mat,
+//                      upper_thresh, config_.sobelThreshold, 255, CV_THRESH_BINARY);
+//        cv::imshow("Line mask overlay", overlay_mat(cv::Rect(cv::Point(sl.iStart.x,sl.iStart.y),cv::Point(sl.iEnd.x,sl.iEnd.y+1))));
+//        cv::imshow("Line mask overlay",upper_thresh);
 #endif
 
-        // step4: get line thickness from image
-        // todo: handle cases with multiple line segments
-        int line_thickness = (int)cv::sum(overlay_mat)[0];
+        // step4: get connected components (can be multiple) and calculate midpoints
+        std::vector<std::vector<cv::Point> > line_contours;
+        std::vector<cv::Vec4i> hierarchy;
+        // todo: use some kind of connected contours based on threshold value
+        cv::findContours(overlay_mat, line_contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
 
+#ifdef DRAW_DEBUG
+        // line contours
+        cv::namedWindow("Line contours", CV_WINDOW_NORMAL);
+        cv::Mat line_contour_image = current_image.clone();
+        for (int i=0; i<line_contours.size(); ++i)
+          cv::drawContours(line_contour_image, line_contours, i, cv::Scalar(255));
+        cv::imshow("Line contours", line_contour_image);
+#endif
 
-        // step5: get midpoint of line
-        cv::Mat locations;
-        cv::findNonZero(overlay_mat, locations);
-        double min, max;
-        if (search_dir == search_direction::x) {
-            cv::minMaxLoc(locations.col(0), &min, &max);
-        } else if (search_dir == search_direction::y) {
-            cv::minMaxLoc(locations.col(1), &min, &max);
+        // step5: get midpoints of components
+        cv::Rect bounds;
+        for (auto contour: line_contours) {
+          bounds = cv::boundingRect( cv::Mat(contour) );
+          // todo: add parameter if we will use contours
+          if (bounds.area() > 6) {
+            line_widths.push_back(bounds.br().x-bounds.tl().x);
+            image_points.push_back(bounds.br()+bounds.br()-bounds.tl());
+          }
         }
+//        cv::Mat locations;
+//        cv::findNonZero(overlay_mat, locations);
+//        if (!locations.empty()) {
+//          double min, max;
+//          if (search_dir == search_direction::x) {
+//            cv::minMaxLoc(locations.col(0), &min, &max);
+//          } else if (search_dir == search_direction::y) {
+//            cv::minMaxLoc(locations.col(1), &min, &max);
+//          }
 
-        if (search_dir == search_direction::x) {
-            line_widths.push_back(max-min);
-            image_points.push_back(cv::Point(min+line_thickness*0.5, sl.iStart.y));
-        } else if (search_dir == search_direction::y) {
-            line_widths.push_back(max-min);
-            image_points.push_back(cv::Point(sl.iStart.x,min+line_thickness*0.5));
-        }
+//          if (search_dir == search_direction::x) {
+//            line_widths.push_back(max-min);
+//            image_points.push_back(cv::Point(min+line_thickness*0.5, sl.iStart.y));
+//          } else if (search_dir == search_direction::y) {
+//            line_widths.push_back(max-min);
+//            image_points.push_back(cv::Point(sl.iStart.x,min+line_thickness*0.5));
+//          }
+//        }
         return;
     }
 
@@ -384,18 +409,18 @@ public:
         cv::Mat debug_image;
         cv::cvtColor(current_image, debug_image, CV_GRAY2RGB);
 
-        int search_steps = 5;
+        int search_steps = 6;
         int pixel_step = 50;
         SearchLine lines[search_steps];
-        for (int it = 0; it < search_steps*pixel_step; it+=pixel_step) {
+        for (int it = 3; it < search_steps; ++it) {
             if (search_dir == search_direction::x) {
                 lines[it].iStart = cv::Point(0,it*pixel_step);
-                lines[it].iEnd = cv::Point(current_image.rows, it*pixel_step);
+                lines[it].iEnd = cv::Point(current_image.cols, it*pixel_step);
             } else if (search_dir == search_direction::y) {
                 lines[it].iStart = cv::Point(it*pixel_step, 0);
-                lines[it].iEnd = cv::Point(it*pixel_step, current_image.cols);
+                lines[it].iEnd = cv::Point(it*pixel_step, current_image.rows);
             }
-            cv::line(debug_image, lines[it].iStart, lines[it].iEnd, cv::Scalar(0,255,0));
+            cv::line(debug_image, lines[it].iStart, lines[it].iEnd, cv::Scalar(255,255,255));
             findByLineSearch(lines[it],
                              current_image,
                              search_dir,
@@ -408,7 +433,7 @@ public:
         }
         cv::namedWindow("Debug lineCheck", CV_WINDOW_NORMAL);
         cv::imshow("Debug lineCheck", debug_image);
-        cv::waitKey(0);
+        cv::waitKey(1);
         return;
     }
 

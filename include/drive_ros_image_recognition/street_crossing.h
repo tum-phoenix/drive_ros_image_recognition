@@ -65,7 +65,7 @@ private:
     void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
 
 
-#ifdef DRAW_DEUBG
+#ifdef DRAW_DEBUG
     image_transport::Publisher debugImagePublisher;
     cv::Mat debugImage;
 #endif
