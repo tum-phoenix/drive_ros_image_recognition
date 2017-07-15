@@ -43,7 +43,7 @@ generate_messages(
     )
 
 generate_dynamic_reconfigure_options(
-  cfg/NewRoadDetection.cfg
+  cfg/LineDetection.cfg
 )
 
 catkin_package(
@@ -148,7 +148,29 @@ install(TARGETS warp_image_nodelet
     )
 
 ################################################################################
-# Street crossing node (LMS port)
+# Street crossing detection node (LMS port)
+################################################################################
+
+add_library(street_crossing_nodelet
+    src/street_crossing.cpp
+    )
+
+add_dependencies(street_crossing_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(street_crossing_nodelet
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+    )
+
+install(TARGETS street_crossing_nodelet
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
+# Street crossing detection node (LMS port)
 ################################################################################
 
 add_executable(street_crossing_node

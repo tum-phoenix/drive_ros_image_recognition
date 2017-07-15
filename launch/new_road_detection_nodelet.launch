@@ -2,7 +2,7 @@
     <arg name="new_road_detection_nodelet_manager" default=""/>
 
     <arg name="road_trajectory_topic" default="/road_trajectory"/>
-    <arg name="incoming_image" default="/undistorted_image"/>
+    <arg name="incoming_image" default="/camera1/image_raw"/>
 
     <!-- if no manager provided, load it -->
     <group if="$(eval arg('new_road_detection_nodelet_manager') == '')">
@@ -14,6 +14,8 @@
             <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
             <remap from="car" to "car_out"/> -->
             <rosparam command="load" file="$(find drive_ros_image_recognition)/new_road_detection.yaml"/>
+            <!--we need this for image-world transformations-->
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
         </node>
     </group>
 
@@ -25,6 +27,8 @@
             <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
             <remap from="car" to "car_out"/> -->
             <rosparam command="load" file="$(find drive_ros_image_recognition)/new_road_detection.yaml"/>
+            <!--we need this for image-world transformations-->
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
         </node>
     </group>
 </launch>

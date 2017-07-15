@@ -19,8 +19,6 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   laneWidthOffsetInMeter_(0.1),
   translateEnvironment_(false),
   useWeights_(false),
-  renderDebugImage_(false),
-  numThreads_(0),
   line_output_pub_(),
   it_(pnh),
 #ifdef PUBLISH_DEBUG
@@ -31,11 +29,7 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   dsrv_server_(),
   dsrv_cb_(boost::bind(&NewRoadDetection::reconfigureCB, this, _1, _2)),
   lines_(),
-  threadsRunning_(false),
   linesToProcess_(0),
-  threads_(),
-  conditionNewLine_(),
-  conditionLineProcessed_(),
   current_image_(),
   road_points_buffer_(),
   transform_helper_(),
@@ -86,13 +80,8 @@ bool NewRoadDetection::init() {
     ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<useWeights_);
   }
 
-  if (!pnh_.getParam("new_road_detection/renderDebugImage", renderDebugImage_)) {
-    ROS_WARN_STREAM("Unable to load 'renderDebugImage' parameter, using default: "<<renderDebugImage_);
-  }
-
-  if (!pnh_.getParam("new_road_detection/threads", numThreads_)) {
-    ROS_WARN_STREAM("Unable to load 'threads' parameter, using default: "<<numThreads_);
-  }
+  transform_helper_.init(pnh_);
+  image_operator_ = ImageOperator(transform_helper_);
 
   dsrv_server_.setCallback(dsrv_cb_);
 
@@ -113,8 +102,6 @@ bool NewRoadDetection::init() {
   filtered_points_pub_ = it_.advertise("filtered_points_out", 10);
 #endif
 
-  transform_helper_.init(pnh_);
-  image_operator_ = ImageOperator(transform_helper_);
 
   // todo: we have not decided on an interface for these debug channels yet
   //    debugAllPoints = writeChannel<lms::math::polyLine2f>("DEBUG_ALL_POINTS");
@@ -132,19 +119,14 @@ void NewRoadDetection::debugImageCallback(const sensor_msgs::ImageConstPtr& img_
   cv::Rect roi(cv::Point(current_image_->cols/2-(410/2),0),cv::Point(current_image_->cols/2+(410/2),current_image_->rows));
   search_direction search_dir = search_direction::x;
   search_method search_meth = search_method::sobel;
+  search_method search_meth_brightness = search_method::brightness;
   image_operator_.debugPointsImage((*current_image_)(roi), search_dir, search_meth);
+  image_operator_.debugPointsImage((*current_image_)(roi), search_dir, search_meth_brightness);
 }
 
 void NewRoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const RoadLaneConstPtr& road_in){
   current_image_ = convertImageMessage(img_in);
   road_points_buffer_ = road_in->points;
-
-  // todo: adjust this time value
-//  if (img_in->header.stamp.toSec() - road_buffer_.header.stamp.toSec() > 0.1) {
-//    // todo: move to warn level, too spammy right now
-//    ROS_DEBUG("Outdated road callback in buffer, skipping incoming image");
-//    return;
-//  }
 
   //if we have a road(?), try to find the line
   if(road_in->points.size() > 1){
@@ -238,59 +220,14 @@ bool NewRoadDetection::find(){
       l.wEnd = cv::Point2f(it_mid->x(),it_mid->y());
     }
 
-    //transform them in image-coordinates
-    std::unique_lock<std::mutex> lock(mutex);
     transform_helper_.worldToImage(l.wStart,l.iStart);
     transform_helper_.worldToImage(l.wEnd,l.iEnd);
     lines_.push_back(l);
-    linesToProcess_++;
-
-    conditionNewLine_.notify_one();
-  }
-
-  if(numThreads_ == 0) {
-    // single threaded
     for(SearchLine &l:lines_){
       processSearchLine(l);
     }
-  } else {
-    // multi threaded
-
-    // initialize and start threads if not yet there
-    if(threads_.size() == 0) {
-      threadsRunning_ = true;
-      for(int i = 0; i < numThreads_; i++) {
-        threads_.emplace_back([this] () {
-          threadFunction();
-        });
-      }
-    }
-
-    // wait till every search line was processed
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      while(linesToProcess_ > 0) conditionNewLine_.wait(lock);
-    }
   }
   return true;
-}
-
-void NewRoadDetection::threadFunction() {
-  while(threadsRunning_) {
-    SearchLine line;
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      while(threadsRunning_ && lines_.empty()) conditionNewLine_.wait(lock);
-      if(lines_.size() > 0) {
-        line = lines_.front();
-        lines_.pop_front();
-      }
-      if(!threadsRunning_) {
-        break;
-      }
-    }
-    processSearchLine(line);
-  }
 }
 
 void NewRoadDetection::processSearchLine(const SearchLine &l) {
@@ -322,8 +259,6 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
 
   // draw unfiltered image points
 #if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-  if(renderDebugImage_) {
-    std::unique_lock<std::mutex> lock(debugAllPointsMutex);
     cv::namedWindow("Unfiltered points", CV_WINDOW_NORMAL);
     cv::Mat found_points_mat = current_image_->clone();
     for (auto point : foundPoints) {
@@ -339,7 +274,6 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
 #ifdef PUBLISH_DEBUG
     detected_points_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, found_points_mat).toImageMsg());
 #endif
-  }
 #endif
 
   //filter
@@ -384,9 +318,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
 
   // draw filtered points
 #if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-  if(renderDebugImage_) {
     // todo: make some more efficient storage method here, will translate back and forth here for now
-    std::unique_lock<std::mutex> lock(debugValidPointsMutex);
     cv::namedWindow("Filtered Points", CV_WINDOW_NORMAL);
     cv::Mat filtered_points_mat = current_image_->clone();
     cv::Point img_point;
@@ -400,7 +332,6 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
 #ifdef PUBLISH_DEBUG
     filtered_points_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, filtered_points_mat).toImageMsg());
 #endif
-  }
 #endif
 
   //Handle found points
@@ -445,37 +376,21 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   }
   lane_out.roadStateType = drive_ros_image_recognition::RoadLane::UNKNOWN;
   line_output_pub_.publish(lane_out);
-
-  std::unique_lock<std::mutex> lock(mutex);
-  linesToProcess_--;
-  conditionLineProcessed_.notify_all();
 }
 
-void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::NewRoadDetectionConfig& config, uint32_t level){
+void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig &config, uint32_t level){
   image_operator_.setConfig(config);
   searchOffset_ = config.searchOffset;
   findPointsBySobel_ = config.findBySobel;
-  renderDebugImage_ = config.renderDebugImage;
   minLineWidthMul_ = config.minLineWidthMul;
   maxLineWidthMul_ = config.maxLineWidthMul;
   brightness_threshold_ = config.brightness_threshold;
   laneWidthOffsetInMeter_ = config.laneWidthOffsetInMeter;
   useWeights_ = config.useWeights;
   sobelThreshold_ = config.sobelThreshold;
-  numThreads_ = config.threads;
 }
 
 NewRoadDetection::~NewRoadDetection() {
-  {
-    std::unique_lock<std::mutex> lock(mutex);
-    threadsRunning_ = false;
-    conditionNewLine_.notify_all();
-  }
-  for(auto &t : threads_) {
-    if(t.joinable()) {
-      t.join();
-    }
-  }
 }
 
 void NewRoadDetectionNodelet::onInit() {

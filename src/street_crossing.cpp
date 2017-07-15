@@ -1,21 +1,24 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <vector>
-//#include "drive_ros_image_recognition/warp_image.h"
 #include "drive_ros_image_recognition/street_crossing.h"
+#include <pluginlib/class_list_macros.h>
 
 namespace drive_ros_image_recognition {
 
-StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh_, const ros::NodeHandle pnh_)
-  : nh(nh_)
-  , pnh(pnh_)
-  , imageTransport(nh_)
-  , sobelThreshold(50)
-  , minLineWidthMul(0.5)
-  , maxLineWidthMul(2.0)
-  , lineWidth(0.4)
+StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh)
+  : nh_(nh)
+  , pnh_(pnh)
+  , imageTransport_(pnh)
+  , sobelThreshold_(50)
+  , minLineWidthMul_(0.5)
+  , maxLineWidthMul_(2.0)
+  , lineWidth_(0.4)
+  , line_output_pub_()
   , transform_helper_()
   , image_operator_()
+  , dsrv_server_()
+  , dsrv_cb_(boost::bind(&StreetCrossingDetection::reconfigureCB, this, _1, _2))
   #ifdef DRAW_DEBUG
   , debugImage(0, 0, CV_8UC1)
   #endif
@@ -23,28 +26,27 @@ StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh_, cons
 }
 
 StreetCrossingDetection::~StreetCrossingDetection() {
-
 }
 
 bool StreetCrossingDetection::init() {
-  imageSubscriber = imageTransport.subscribe("img_in", 10, &StreetCrossingDetection::imageCallback, this);
-  // todo: advertise lines
+  dsrv_server_.setCallback(dsrv_cb_);
 
-#ifdef DRAW_DEBUG
-  debugImagePublisher = imageTransport.advertise("/street_crossing/debug_image", 10);
-#endif
-
-  transform_helper_.init(pnh);
+  transform_helper_.init(pnh_);
   image_operator_ = ImageOperator(transform_helper_);
 
+  imageSubscriber_ = imageTransport_.subscribe("img_in", 10, &StreetCrossingDetection::imageCallback, this);
+  ROS_INFO_STREAM("Subscriber image transport with topic "<<imageSubscriber_.getTopic());
+
+  line_output_pub_ = pnh_.advertise<drive_ros_image_recognition::RoadLane>("line_out",10);
+
+#ifdef DRAW_DEBUG
+  debugImagePublisher = imageTransport_.advertise("/street_crossing/debug_image", 10);
+#endif
   return true;
 }
 
-// todo:
-// dynamic reconfigure
-
 void StreetCrossingDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
-  currentImage = convertImageMessage(imgIn);
+  currentImage_ = convertImageMessage(imgIn);
   findStartline();
 }
 
@@ -52,115 +54,57 @@ bool StreetCrossingDetection::findStartline() {
   std::vector<cv::Point2f> linePoints;
   SearchLine mySl;
 
-  // Sobel -> will leave this in for now, even though we actually sobel two times like this
-  currentSobelImage.reset(new cv::Mat(currentImage->rows, currentImage->cols, CV_8UC1));
-  cv::Sobel(*currentImage, *currentSobelImage, -1, 0, 1);
-
   // use search-line to find stop-line
-  mySl.iStart = cv::Point2f(currentImage->cols / 2, currentImage->rows * .8);
-  mySl.iEnd = cv::Point2f(currentImage->cols / 2, currentImage->rows * .4);
+  mySl.iStart = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .4);
+  mySl.iEnd = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .8);
 
-//  linePoints = processSearchLine(mySl);
-
-  // test a single line
-  cv::Mat debug_image;
-  cv::cvtColor(*currentImage, debug_image, CV_GRAY2RGB);
+  // find line using unified header
   search_direction search_dir = search_direction::y;
   search_method search_meth = search_method::sobel;
   std::vector<cv::Point> image_points;
   std::vector<int> line_widths;
-  image_operator_.findByLineSearch(mySl,*currentImage,search_dir,search_meth,image_points,line_widths);
-  cv::line(debug_image, mySl.iStart, mySl.iEnd, cv::Scalar(0,255,0));
+  image_operator_.findByLineSearch(mySl,*currentImage_,search_dir,search_meth,image_points,line_widths);
+#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
+  cv::Mat debug_image;
+  cv::cvtColor(*currentImage_, debug_image, CV_GRAY2RGB);
+  cv::line(debug_image, mySl.iStart, mySl.iEnd, cv::Scalar(255,255,255));
   for (auto point: image_points) {
-        cv::circle(debug_image,point,2,cv::Scalar(0,0,255),2);
+    cv::circle(debug_image,point,2,cv::Scalar(0,255,0),2);
   }
+#endif
+#ifdef DRAW_DEBUG
   cv::namedWindow("Crossing Search debug",CV_WINDOW_NORMAL);
   cv::imshow("Crossing Search debug",debug_image);
-  cv::waitKey(0);
-
-  // test array of lines
-  image_operator_.debugPointsImage(*currentImage, search_dir, search_meth);
-
-  // Draw / publish points
-#ifdef DRAW_DEBUG
-  //  debugImage = currentSobelImage->clone();
-  debugImage = currentImage->clone();
-  // Image dimensions:1280x344
-  for(auto point : linePoints) {
-    cv::line(debugImage, cv::Point(point.x - 40, point.y), cv::Point(point.x + 40, point.y), cv::Scalar(255));
-  }
-  // draw searchline
-  cv::line(debugImage, mySl.iStart, mySl.iEnd, cv::Scalar(255));
+  cv::waitKey(1);
+#endif
+#ifdef PUBLISH_DEBUG
   debugImagePublisher.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, debugImage).toImageMsg());
 #endif
+
+  // test array of lines
+  //  image_operator_.debugPointsImage(*currentImage, search_dir, search_meth);
 }
 
-std::vector<cv::Point2f> StreetCrossingDetection::processSearchLine(SearchLine &sl) {
-    std::vector<cv::Point2f> foundPoints;
-
-    bool foundLowHigh = false;
-    int pxlCounter = 0;
-    cv::Point2f iStartPxlPeak;
-
-    cv::LineIterator lineIt(*currentSobelImage, sl.iStart, sl.iEnd);
-    cv::Rect rect(0, 0, currentSobelImage->cols, currentSobelImage->rows);
-    //  float iDist = cv::norm(sl.iEnd - sl.iStart);
-    //  float wDist = cv::norm(sl.wEnd - sl.wStart);
-
-    for(int i = 0; i < lineIt.count; i++, ++lineIt) {
-        // safety check : is the point inside the image
-        if(!rect.contains(lineIt.pos())){
-
-            ROS_WARN("Received an invalid point outside the image to check for Sobel (%i,%i)", lineIt.pos().x, lineIt.pos().y);
-            return foundPoints;
-        }
-
-        // Search for a bright pixel. Searching from bottom to top
-        int sobel = currentSobelImage->at<char>(lineIt.pos());
-
-        if(sobel > sobelThreshold) {
-            // found low-high pass
-            if(!foundLowHigh) {
-                foundLowHigh = true;
-                pxlCounter = 0;
-                iStartPxlPeak.x = lineIt.pos().x;
-                iStartPxlPeak.y = lineIt.pos().y;
-            }
-        } else if(sobel < -sobelThreshold) {
-            // found high-low pass
-            // check if we found a lowHigh + highLow border
-            if(foundLowHigh){
-                //check if the points have the right distance
-                // TODO to bad, calculate for each road line (how should we use them for searching?
-                // float pxlPeakWidth = iDist / wDist * lineWidth; // todo: understand this
-
-                //logger.debug("")<<"crossing found highLow: "<<pxlCounter<<" "<<pxlPeakWidth;
-                //logger.debug("")<<"crossing found max: "<<pxlPeakWidth*maxLineWidthMul;
-                //logger.debug("")<<"crossing found min: "<<pxlPeakWidth*minLineWidthMul;
-
-                // todo: check if the line we found has the correct height
-                // if((pxlCounter > (pxlPeakWidth * minLineWidthMul)) && (pxlCounter < (pxlPeakWidth * maxLineWidthMul))) {
-                // return the middle of the line we found
-                // cv::Point2f iMid((iStartPxlPeak.x + lineIt.pos().x) *.5, (iStartPxlPeak.x + lineIt.pos().y) * .5);
-
-                foundPoints.push_back(lineIt.pos());
-                // cv::Point2f wMid;
-                // imageToWorld(iMid, wMid);
-                // foundPoints.push_back(wMid);
-                // ROS_DEBUG("Found a stop-line");
-                // }
-            }
-            pxlCounter = 0;
-            foundLowHigh = false;
-            // if not, we dont have to do anything
-        }
-
-        // for calculation of line width
-        if(foundLowHigh){
-            pxlCounter++;
-        }
-    }
-    return foundPoints;
+void StreetCrossingDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level){
+  image_operator_.setConfig(config);
+  sobelThreshold_ = config.sobelThreshold;
+  minLineWidthMul_ = config.minLineWidthMul;
+  maxLineWidthMul_ = config.maxLineWidthMul;
+  lineWidth_ = config.lineWidth;
 }
 
-} //namespace drive_ros_image_recognition
+void StreetCrossingDetectionNodelet::onInit() {
+  street_crossing_detection_.reset(new StreetCrossingDetection(getNodeHandle(),getPrivateNodeHandle()));
+  if (!street_crossing_detection_->init()) {
+    ROS_ERROR("StreetCrossing nodelet failed to initialize");
+    // nodelet failing will kill the entire loader anyway
+    ros::shutdown();
+  }
+  else {
+    ROS_INFO("StreetCrossing detection nodelet succesfully initialized");
+  }
+}
+
+} // namespace drive_ros_image_recognition
+
+PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::StreetCrossingDetectionNodelet, nodelet::Nodelet)

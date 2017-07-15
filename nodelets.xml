@@ -15,3 +15,12 @@
   </description>
   </class>
 </library>
+
+<!-- new_road_detection nodelet -->
+<library path="lib/libstreet_crossing_nodelet">
+  <class name="drive_ros_image_recognition/StreetCrossingDetectionNodelet" type="drive_ros_image_recognition::StreetCrossingDetectionNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  Street crossing detection nodelet.
+  </description>
+  </class>
+</library>
