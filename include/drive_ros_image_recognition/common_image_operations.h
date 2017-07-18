@@ -55,6 +55,7 @@ inline bool getHomographyMatParam(const ros::NodeHandle& pnh, cv::Mat mat, const
     return false;
   }
   // update values
+  mat = cv::Mat::zeros(3,3,CV_64F);
   for(unsigned i=0; i < temp_vals.size(); i++) {
     mat.at<double>(i) = temp_vals[i];
   }
