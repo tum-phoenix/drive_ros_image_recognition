@@ -1,7 +1,7 @@
 <launch>
     <arg name="warp_nodelet_manager" default=""/>
 
-    <arg name="camera_image_topic" default="/camera1/image_raw"/>
+    <arg name="camera_image_topic" default="/camera/image_raw"/>
     <arg name="warped_image_topic" default="/warped_image"/>
     <arg name="undistort_out" default="/undistorted_image"/>
 
