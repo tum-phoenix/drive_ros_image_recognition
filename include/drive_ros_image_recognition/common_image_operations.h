@@ -54,8 +54,9 @@ inline bool getHomographyMatParam(const ros::NodeHandle& pnh, cv::Mat mat, const
     ROS_ERROR("Retreived homography matrix %s does not have 9 values", mat_param.c_str());
     return false;
   }
+  // update values
+  mat = cv::Mat::zeros(3,3,CV_64F);
   for(unsigned i=0; i < temp_vals.size(); i++) {
-    mat = cv::Mat::zeros(3,3,CV_64F);
     mat.at<double>(i) = temp_vals[i];
   }
   ROS_DEBUG_STREAM("Paramater matrix loaded as: "<<mat);
