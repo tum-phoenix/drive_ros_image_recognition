@@ -1,5 +1,5 @@
-#ifndef NEW_ROAD_DETECTION_H
-#define NEW_ROAD_DETECTION_H
+#ifndef ROAD_DETECTION_H
+#define ROAD_DETECTION_H
 
 #include <ros/ros.h>
 #include <sensor_msgs/image_encodings.h>
@@ -25,9 +25,9 @@
 namespace drive_ros_image_recognition {
 
 /**
- * @brief Port of LMS module new_road_detection to ROS
+ * @brief Port of LMS module road_detection to ROS
  **/
-class NewRoadDetection {
+class RoadDetection {
     // configs
     float searchOffset_;
     float distanceBetweenSearchlines_;
@@ -85,17 +85,17 @@ class NewRoadDetection {
     ImageOperator image_operator_;
 
 public:
-    NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);
-    ~NewRoadDetection();
+    RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);
+    ~RoadDetection();
     bool init();
 };
 
-class NewRoadDetectionNodelet: public nodelet::Nodelet {
+class RoadDetectionNodelet: public nodelet::Nodelet {
 public:
   virtual void onInit();
 private:
-  std::unique_ptr<NewRoadDetection> new_road_detection_;
+  std::unique_ptr<RoadDetection> road_detection_;
 };
 
 }
-#endif // NEW_ROAD_DETECTION_H
+#endif // ROAD_DETECTION_H

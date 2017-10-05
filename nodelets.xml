@@ -7,16 +7,16 @@
   </class>
 </library>
 
-<!-- new_road_detection nodelet -->
-<library path="lib/libnew_road_detection_nodelet">
-  <class name="drive_ros_image_recognition/NewRoadDetectionNodelet" type="drive_ros_image_recognition::NewRoadDetectionNodelet" base_class_type="nodelet::Nodelet">
+<!-- road_detection nodelet -->
+<library path="lib/libroad_detection_nodelet">
+  <class name="drive_ros_image_recognition/RoadDetectionNodelet" type="drive_ros_image_recognition::RoadDetectionNodelet" base_class_type="nodelet::Nodelet">
   <description>
   Image warper nodelet.
   </description>
   </class>
 </library>
 
-<!-- new_road_detection nodelet -->
+<!-- road_detection nodelet -->
 <library path="lib/libstreet_crossing_nodelet">
   <class name="drive_ros_image_recognition/StreetCrossingDetectionNodelet" type="drive_ros_image_recognition::StreetCrossingDetectionNodelet" base_class_type="nodelet::Nodelet">
   <description>
