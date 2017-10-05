@@ -1,8 +1,8 @@
 <launch>
-    <arg name="incoming_image" default="/camera1/image_raw"/>
+    <arg name="incoming_image" default="/camera/image_raw"/>
 
     <node name="street_crossing" pkg="drive_ros_image_recognition" type="street_crossing_node" respawn="false" output="screen">
-        <remap from="/img_in" to="$(arg incoming_image)"/>
+        <remap from="~/img_in" to="$(arg incoming_image)"/>
         <!--we need this for image-world transformations-->
         <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography_matrix.yaml"/>
     </node>

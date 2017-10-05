@@ -1,6 +1,6 @@
 <launch>
     <arg name="street_crossing_nodelet_manager" default=""/>
-    <arg name="incoming_image" default="/camera1/image_raw"/>
+    <arg name="incoming_image" default="/camera/image_raw"/>
 
     <!-- if no manager provided, load it -->
     <group if="$(eval arg('street_crossing_nodelet_manager') == '')">

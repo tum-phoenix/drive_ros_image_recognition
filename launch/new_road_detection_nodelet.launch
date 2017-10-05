@@ -2,7 +2,7 @@
     <arg name="new_road_detection_nodelet_manager" default=""/>
 
     <arg name="road_trajectory_topic" default="/road_trajectory"/>
-    <arg name="incoming_image" default="/camera1/image_raw"/>
+    <arg name="incoming_image" default="/camera/image_raw"/>
 
     <!-- if no manager provided, load it -->
     <group if="$(eval arg('new_road_detection_nodelet_manager') == '')">
