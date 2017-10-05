@@ -1,9 +1,9 @@
-#include "drive_ros_image_recognition/new_road_detection.h"
+#include "drive_ros_image_recognition/road_detection.h"
 #include <pluginlib/class_list_macros.h>
 
 namespace drive_ros_image_recognition {
 
-NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh):
+RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh):
   nh_(nh),
   pnh_(pnh),
 //  img_sub_(),
@@ -27,7 +27,7 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
   filtered_points_pub_(),
 #endif
   dsrv_server_(),
-  dsrv_cb_(boost::bind(&NewRoadDetection::reconfigureCB, this, _1, _2)),
+  dsrv_cb_(boost::bind(&RoadDetection::reconfigureCB, this, _1, _2)),
   lines_(),
   linesToProcess_(0),
   current_image_(),
@@ -38,45 +38,45 @@ NewRoadDetection::NewRoadDetection(const ros::NodeHandle nh, const ros::NodeHand
 {
 }
 
-bool NewRoadDetection::init() {
+bool RoadDetection::init() {
   // load parameters
-  if (!pnh_.getParam("new_road_detection/searchOffset", searchOffset_)) {
+  if (!pnh_.getParam("road_detection/searchOffset", searchOffset_)) {
     ROS_WARN_STREAM("Unable to load 'searchOffset' parameter, using default: "<<searchOffset_);
   }
 
-  if (!pnh_.getParam("new_road_detection/distanceBetweenSearchlines", distanceBetweenSearchlines_)) {
+  if (!pnh_.getParam("road_detection/distanceBetweenSearchlines", distanceBetweenSearchlines_)) {
     ROS_WARN_STREAM("Unable to load 'distanceBetweenSearchlines' parameter, using default: "<<distanceBetweenSearchlines_);
   }
 
-  if (!pnh_.getParam("new_road_detection/minLineWidthMul", minLineWidthMul_)) {
+  if (!pnh_.getParam("road_detection/minLineWidthMul", minLineWidthMul_)) {
     ROS_WARN_STREAM("Unable to load 'minLineWidthMul' parameter, using default: "<<minLineWidthMul_);
   }
 
-  if (!pnh_.getParam("new_road_detection/maxLineWidthMul", maxLineWidthMul_)) {
+  if (!pnh_.getParam("road_detection/maxLineWidthMul", maxLineWidthMul_)) {
     ROS_WARN_STREAM("Unable to load 'maxLineWidthMul' parameter, using default: "<<maxLineWidthMul_);
   }
 
-  if (!pnh_.getParam("new_road_detection/findBySobel", findPointsBySobel_)) {
+  if (!pnh_.getParam("road_detection/findBySobel", findPointsBySobel_)) {
     ROS_WARN_STREAM("Unable to load 'findBySobel' parameter, using default: "<<findPointsBySobel_);
   }
 
-  if (!pnh_.getParam("new_road_detection/brightness_threshold", brightness_threshold_)) {
+  if (!pnh_.getParam("road_detection/brightness_threshold", brightness_threshold_)) {
     ROS_WARN_STREAM("Unable to load 'threshold' parameter, using default: "<<brightness_threshold_);
   }
 
-  if (!pnh_.getParam("new_road_detection/sobelThreshold", sobelThreshold_)) {
+  if (!pnh_.getParam("road_detection/sobelThreshold", sobelThreshold_)) {
     ROS_WARN_STREAM("Unable to load 'sobelThreshold' parameter, using default: "<<sobelThreshold_);
   }
 
-  if (!pnh_.getParam("new_road_detection/laneWidthOffsetInMeter", laneWidthOffsetInMeter_)) {
+  if (!pnh_.getParam("road_detection/laneWidthOffsetInMeter", laneWidthOffsetInMeter_)) {
     ROS_WARN_STREAM("Unable to load 'laneWidthOffsetInMeter' parameter, using default: "<<laneWidthOffsetInMeter_);
   }
 
-  if (!pnh_.getParam("new_road_detection/translateEnvironment", translateEnvironment_)) {
+  if (!pnh_.getParam("road_detection/translateEnvironment", translateEnvironment_)) {
     ROS_WARN_STREAM("Unable to load 'translateEnvironment' parameter, using default: "<<translateEnvironment_);
   }
 
-  if (!pnh_.getParam("new_road_detection/useWeights", useWeights_)) {
+  if (!pnh_.getParam("road_detection/useWeights", useWeights_)) {
     ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<useWeights_);
   }
 
@@ -90,9 +90,9 @@ bool NewRoadDetection::init() {
 //  road_sub_.reset(new message_filters::Subscriber<RoadLane>(pnh_,"road_in", 1000));
 //  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(100), *img_sub_, *road_sub_));
 //  sync_->setAgePenalty(1.0);
-//  sync_->registerCallback(boost::bind(&NewRoadDetection::syncCallback, this, _1, _2));
+//  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
 
-  img_sub_debug_ = it_.subscribe("img_in", 1000, &NewRoadDetection::debugImageCallback, this);
+  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
 
   line_output_pub_ = pnh_.advertise<drive_ros_image_recognition::RoadLane>("line_out",10);
 
@@ -113,7 +113,7 @@ bool NewRoadDetection::init() {
   return true;
 }
 
-void NewRoadDetection::debugImageCallback(const sensor_msgs::ImageConstPtr& img_in) {
+void RoadDetection::debugImageCallback(const sensor_msgs::ImageConstPtr& img_in) {
   current_image_ = convertImageMessage(img_in);
   // crop image to 410 width
   cv::Rect roi(cv::Point(current_image_->cols/2-(410/2),0),cv::Point(current_image_->cols/2+(410/2),current_image_->rows));
@@ -124,7 +124,7 @@ void NewRoadDetection::debugImageCallback(const sensor_msgs::ImageConstPtr& img_
   image_operator_.debugPointsImage((*current_image_)(roi), search_dir, search_meth_brightness);
 }
 
-void NewRoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const RoadLaneConstPtr& road_in){
+void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const RoadLaneConstPtr& road_in){
   current_image_ = convertImageMessage(img_in);
   road_points_buffer_ = road_in->points;
 
@@ -169,7 +169,7 @@ void NewRoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, co
   //    }
 }
 
-bool NewRoadDetection::find(){
+bool RoadDetection::find(){
   //clear old lines
   ROS_INFO("Creating new lines");
   lines_.clear();
@@ -230,7 +230,7 @@ bool NewRoadDetection::find(){
   return true;
 }
 
-void NewRoadDetection::processSearchLine(const SearchLine &l) {
+void RoadDetection::processSearchLine(const SearchLine &l) {
 //  std::vector<int> xv;
 //  std::vector<int> yv;
 
@@ -378,7 +378,7 @@ void NewRoadDetection::processSearchLine(const SearchLine &l) {
   line_output_pub_.publish(lane_out);
 }
 
-void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig &config, uint32_t level){
+void RoadDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig &config, uint32_t level){
   image_operator_.setConfig(config);
   searchOffset_ = config.searchOffset;
   findPointsBySobel_ = config.findBySobel;
@@ -390,21 +390,21 @@ void NewRoadDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionC
   sobelThreshold_ = config.sobelThreshold;
 }
 
-NewRoadDetection::~NewRoadDetection() {
+RoadDetection::~RoadDetection() {
 }
 
-void NewRoadDetectionNodelet::onInit() {
-  new_road_detection_.reset(new NewRoadDetection(getNodeHandle(),getPrivateNodeHandle()));
-  if (!new_road_detection_->init()) {
-    ROS_ERROR("New_road_detection nodelet failed to initialize");
+void RoadDetectionNodelet::onInit() {
+  road_detection_.reset(new RoadDetection(getNodeHandle(),getPrivateNodeHandle()));
+  if (!road_detection_->init()) {
+    ROS_ERROR("road_detection nodelet failed to initialize");
     // nodelet failing will kill the entire loader anyway
     ros::shutdown();
   }
   else {
-    ROS_INFO("New road detection nodelet succesfully initialized");
+    ROS_INFO("road detection nodelet succesfully initialized");
   }
 }
 
 } // namespace drive_ros_image_recognition
 
-PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::NewRoadDetectionNodelet, nodelet::Nodelet)
+PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::RoadDetectionNodelet, nodelet::Nodelet)

@@ -62,45 +62,45 @@ include_directories(
 
 
 ################################################################################
-# New road detection node (LMS port)
+# road detection node (LMS port)
 ################################################################################
 
-add_executable(new_road_detection_node
-    src/new_road_detection.cpp
-    src/new_road_detection_node.cpp
+add_executable(road_detection_node
+    src/road_detection.cpp
+    src/road_detection_node.cpp
     )
 
-add_dependencies(new_road_detection_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(road_detection_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-target_link_libraries(new_road_detection_node
+target_link_libraries(road_detection_node
     ${catkin_LIBRARIES}
     ${OpenCV_LIBS}
     ${Boost_LIBRARIES}
     )
 
-install(TARGETS new_road_detection_node
+install(TARGETS road_detection_node
     ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
     )
 
 ################################################################################
-# New road detection nodelet (LMS port)
+# road detection nodelet (LMS port)
 ################################################################################
 
-add_library(new_road_detection_nodelet
-    src/new_road_detection.cpp
+add_library(road_detection_nodelet
+    src/road_detection.cpp
     )
 
-add_dependencies(new_road_detection_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(road_detection_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-target_link_libraries(new_road_detection_nodelet
+target_link_libraries(road_detection_nodelet
     ${catkin_LIBRARIES}
     ${OpenCV_LIBS}
     ${Boost_LIBRARIES}
     )
 
-install(TARGETS new_road_detection_nodelet
+install(TARGETS road_detection_nodelet
     ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

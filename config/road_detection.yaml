@@ -1,4 +1,4 @@
-new_road_detection:
+road_detection:
     searchOffset: 0.15
     distanceBetweenSearchlines: 0.1
     minLineWidthMul: 0.5

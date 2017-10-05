@@ -1,32 +1,32 @@
 <launch>
-    <arg name="new_road_detection_nodelet_manager" default=""/>
+    <arg name="road_detection_nodelet_manager" default=""/>
 
     <arg name="road_trajectory_topic" default="/road_trajectory"/>
     <arg name="incoming_image" default="/camera/image_raw"/>
 
     <!-- if no manager provided, load it -->
-    <group if="$(eval arg('new_road_detection_nodelet_manager') == '')">
-        <node pkg="nodelet" type="nodelet" name="new_road_detection_nodelet_manager"  args="manager" output="screen"/>
+    <group if="$(eval arg('road_detection_nodelet_manager') == '')">
+        <node pkg="nodelet" type="nodelet" name="road_detection_nodelet_manager"  args="manager" output="screen"/>
 
-        <node pkg="nodelet" type="nodelet" name="new_road_detection_nodelet" args="load drive_ros_image_recognition/NewRoadDetectionNodelet new_road_detection_nodelet_manager" output="screen">
+        <node pkg="nodelet" type="nodelet" name="road_detection_nodelet" args="load drive_ros_image_recognition/RoadDetectionNodelet road_detection_nodelet_manager" output="screen">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
             <remap from="~/road_in" to="$(arg road_trajectory_topic)"/>
             <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
             <remap from="car" to "car_out"/> -->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/new_road_detection.yaml"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
             <!--we need this for image-world transformations-->
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography_matrix.yaml"/>
         </node>
     </group>
 
     <!-- use provided nodelet manager -->
-    <group unless="$(eval arg('new_road_detection_nodelet_manager') == '')">
-        <node pkg="nodelet" type="nodelet" name="new_road_detection_nodelet" args="load drive_ros_image_recognition/NewRoadDetectionNodelet $(arg new_road_detection_nodelet_manager)" output="screen">
+    <group unless="$(eval arg('road_detection_nodelet_manager') == '')">
+        <node pkg="nodelet" type="nodelet" name="road_detection_nodelet" args="load drive_ros_image_recognition/RoadDetectionNodelet $(arg road_detection_nodelet_manager)" output="screen">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
             <remap from="~/road_in" to="$(arg road_trajectory_topic)"/>
             <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
             <remap from="car" to "car_out"/> -->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/new_road_detection.yaml"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
             <!--we need this for image-world transformations-->
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography_matrix.yaml"/>
         </node>
