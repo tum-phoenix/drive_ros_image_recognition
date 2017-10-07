@@ -84,6 +84,17 @@ install(TARGETS road_detection_node
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
     )
 
+if(CATKIN_ENABLE_TESTING)
+    find_package(rostest REQUIRED)
+    add_rostest_gtest(road_detection_node_test launch/road_detection.test
+        test/common_image_operations_test.cpp
+        test/road_detection_test.cpp
+        test/geometry_common_test.cpp
+        )
+    target_link_libraries(road_detection_node_test ${catkin_LIBRARIES})
+endif()
+
+
 ################################################################################
 # road detection nodelet (LMS port)
 ################################################################################
@@ -148,7 +159,7 @@ install(TARGETS warp_image_nodelet
     )
 
 ################################################################################
-# Street crossing detection node (LMS port)
+# Street crossing detection nodelet (LMS port)
 ################################################################################
 
 add_library(street_crossing_nodelet
@@ -214,12 +225,3 @@ install(DIRECTORY config/
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
     FILES_MATCHING PATTERN "*.yaml"
     )
-
-################################################################################
-# test header files
-################################################################################
-if(CATKIN_ENABLE_TESTING)
-    find_package(rostest REQUIRED)
-    add_rostest_gtest(common_image_operations_test test/common_image_operations_test.test test/common_image_operations_test.cpp)
-    target_link_libraries(common_image_operations_test ${catkin_LIBRARIES})
-endif()
