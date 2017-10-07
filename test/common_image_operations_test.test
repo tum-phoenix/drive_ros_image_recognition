@@ -1,3 +1,0 @@
-<launch>
- <test test-name="common_image_operations_test" pkg="drive_ros_image_recognition" type="common_image_operations_test" />
-</launch>
