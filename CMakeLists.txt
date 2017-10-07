@@ -31,9 +31,6 @@ find_package(catkin REQUIRED COMPONENTS
 #include Boost for lane line processing
 find_package(Boost REQUIRED)
 
-# include test suite
-find_package(rostest REQUIRED)
-
 add_message_files(
     FILES
     RoadLane.msg
@@ -221,5 +218,8 @@ install(DIRECTORY config/
 ################################################################################
 # test header files
 ################################################################################
-add_rostest_gtest(common_image_operations_test test/common_image_operations_test.test test/common_image_operations_test.cpp)
-target_link_libraries(common_image_operations_test ${catkin_LIBRARIES})
+if(CATKIN_ENABLE_TESTING)
+    find_package(rostest REQUIRED)
+    add_rostest_gtest(common_image_operations_test test/common_image_operations_test.test test/common_image_operations_test.cpp)
+    target_link_libraries(common_image_operations_test ${catkin_LIBRARIES})
+endif()
