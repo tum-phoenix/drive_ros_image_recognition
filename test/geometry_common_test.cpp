@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "drive_ros_image_recognition/geometry_common.h"
+#include <stdio.h>
 
 
 // Declare test
@@ -14,6 +15,13 @@ TEST(GeometryCommon, moveOrtho)
 
   const double dis=78.5569; // distance to move
   const double err=0.0000001; // allowed error
+
+  // don't move
+  drive_ros_geometry_common::moveOrthogonal(line1, line2, 0);
+  EXPECT_NEAR(line1.at(0).x(), line2.at(0).x(), err);
+  EXPECT_NEAR(line1.at(1).x(), line2.at(1).x(), err);
+  EXPECT_NEAR(line1.at(0).y(), line2.at(0).y(), err);
+  EXPECT_NEAR(line1.at(1).y(), line2.at(1).y(), err);
 
   // move line to the right
   drive_ros_geometry_common::moveOrthogonal(line1, line2, dis);
@@ -33,5 +41,25 @@ TEST(GeometryCommon, moveOrtho)
   EXPECT_NEAR(line1.at(1).x(), line3.at(1).x(), err);
   EXPECT_NEAR(line1.at(0).y(), line3.at(0).y(), err);
   EXPECT_NEAR(line1.at(1).y(), line3.at(1).y(), err);
+
+
+  linestring line4, line5;
+  point_xy p3(0,0), p4(0,0);
+  line4.push_back(p3);
+
+  // line with only 1 point
+  drive_ros_geometry_common::moveOrthogonal(line4, line5, dis);
+  EXPECT_NEAR(line4.at(0).x(), line5.at(0).x(), err);
+  EXPECT_NEAR(line4.at(0).y(), line5.at(0).y(), err);
+
+  // two points at 0
+  line4.push_back(p4);
+  drive_ros_geometry_common::moveOrthogonal(line4, line5, dis);
+  EXPECT_NEAR(line4.at(0).x(), line5.at(0).x(), err);
+  EXPECT_NEAR(line4.at(1).x(), line5.at(1).x(), err);
+  EXPECT_NEAR(line4.at(0).y(), line5.at(0).y(), err);
+  EXPECT_NEAR(line4.at(1).y(), line5.at(1).y(), err);
+
+
 
 }
