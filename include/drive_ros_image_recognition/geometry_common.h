@@ -22,18 +22,20 @@ struct orthogonalHelper{
     orthogonalHelper(double distance) : distance_(distance){}
 
     inline void operator()(Segment &s){
-      // offset 90 degrees
-      segment_hc rot;
-      boost::geometry::transform(s, rot, rotate);
-
-      // normalize
       double length = boost::geometry::distance(s.first, s.second);
-      trans::scale_transformer<double, 2, 2> scale(distance_/length);
-      boost::geometry::transform(rot, rot, scale);
+      if(length > 0){
+          // offset 90 degrees
+          segment_hc rot;
+          boost::geometry::transform(s, rot, rotate);
 
-      // offset original segment
-      trans::translate_transformer<double, 2, 2> translate(bg::get<0>(rot.second)-bg::get<0>(rot.first), bg::get<1>(rot.second)-bg::get<1>(rot.first));
-      boost::geometry::transform(s,s,translate);
+          // normalize
+          trans::scale_transformer<double, 2, 2> scale(distance_/length);
+          boost::geometry::transform(rot, rot, scale);
+
+          // offset original segment
+          trans::translate_transformer<double, 2, 2> translate(bg::get<0>(rot.second)-bg::get<0>(rot.first), bg::get<1>(rot.second)-bg::get<1>(rot.first));
+          boost::geometry::transform(s,s,translate);
+      }
     }
 
     double distance_;
