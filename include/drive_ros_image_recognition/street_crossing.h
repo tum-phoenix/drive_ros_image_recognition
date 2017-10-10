@@ -11,8 +11,7 @@
 #include <drive_ros_image_recognition/common_image_operations.h>
 #include <drive_ros_image_recognition/LineDetectionConfig.h>
 #include <nodelet/nodelet.h>
-
-#include "drive_ros_image_recognition/RoadLane.h"
+#include "drive_ros_msgs/RoadLane.h"
 
 namespace drive_ros_image_recognition {
 

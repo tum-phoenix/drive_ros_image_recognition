@@ -5,7 +5,7 @@
 #include <sensor_msgs/image_encodings.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
-#include <drive_ros_image_recognition/RoadLane.h>
+#include <drive_ros_msgs/RoadLane.h>
 #include <dynamic_reconfigure/server.h>
 #include <drive_ros_image_recognition/LineDetectionConfig.h>
 #include <drive_ros_image_recognition/geometry_common.h>
@@ -77,7 +77,7 @@ class RoadDetection {
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig>::CallbackType dsrv_cb_;
     void debugImageCallback(const sensor_msgs::ImageConstPtr& img_in);
-    void syncCallback(const sensor_msgs::ImageConstPtr& img_in, const RoadLaneConstPtr& road_in);
+    void syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in);
     void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
     bool find();
     void processSearchLine(const SearchLine &line);

@@ -20,6 +20,7 @@ find_package(catkin REQUIRED COMPONENTS
     roscpp
     sensor_msgs
     std_msgs
+    drive_ros_msgs
     dynamic_reconfigure
     geometry_msgs
     message_generation
@@ -31,24 +32,13 @@ find_package(catkin REQUIRED COMPONENTS
 #include Boost for lane line processing
 find_package(Boost REQUIRED)
 
-add_message_files(
-    FILES
-    RoadLane.msg
-    )
-
-generate_messages(
-    DEPENDENCIES
-    std_msgs
-    geometry_msgs
-    )
-
 generate_dynamic_reconfigure_options(
   cfg/LineDetection.cfg
 )
 
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS cv_bridge image_transport roscpp sensor_msgs std_msgs message_runtime
+  CATKIN_DEPENDS cv_bridge image_transport roscpp sensor_msgs std_msgs drive_ros_msgs
 )
 
 find_package(OpenCV REQUIRED)

@@ -37,7 +37,7 @@ bool StreetCrossingDetection::init() {
   imageSubscriber_ = imageTransport_.subscribe("img_in", 10, &StreetCrossingDetection::imageCallback, this);
   ROS_INFO_STREAM("Subscriber image transport with topic "<<imageSubscriber_.getTopic());
 
-  line_output_pub_ = pnh_.advertise<drive_ros_image_recognition::RoadLane>("line_out",10);
+  line_output_pub_ = pnh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
 
 #ifdef DRAW_DEBUG
   debugImagePublisher = imageTransport_.advertise("/street_crossing/debug_image", 10);
