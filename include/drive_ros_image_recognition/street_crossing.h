@@ -29,6 +29,9 @@ private:
     std::vector<SearchLine> searchLines_;
     CvImagePtr currentImage_;
 
+    int startLineCounter_;
+    cv::Point lastStartLinePos_;
+
     // communication
     image_transport::ImageTransport imageTransport_;
     image_transport::Subscriber imageSubscriber_;
@@ -41,9 +44,8 @@ private:
     void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
 
 
-#ifdef DRAW_DEBUG
+#ifdef PUBLISH_DEBUG
     image_transport::Publisher debugImagePublisher;
-    cv::Mat debugImage;
 #endif
 
     // methods

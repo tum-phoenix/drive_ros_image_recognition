@@ -19,9 +19,7 @@ StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh, const
   , image_operator_()
   , dsrv_server_()
   , dsrv_cb_(boost::bind(&StreetCrossingDetection::reconfigureCB, this, _1, _2))
-  #ifdef DRAW_DEBUG
-  , debugImage(0, 0, CV_8UC1)
-  #endif
+  , startLineCounter_(0)
 {
 }
 
@@ -39,8 +37,12 @@ bool StreetCrossingDetection::init() {
 
   line_output_pub_ = pnh_.advertise<drive_ros_image_recognition::RoadLane>("line_out",10);
 
-#ifdef DRAW_DEBUG
+#ifdef PUBLISH_DEBUG
   debugImagePublisher = imageTransport_.advertise("/street_crossing/debug_image", 10);
+  ROS_INFO("Will publish debug image to /street_crossing/debug_image");
+#endif
+#ifdef DRAW_DEBUG
+  ROS_INFO("Draw debug image");
 #endif
   return true;
 }
@@ -51,25 +53,45 @@ void StreetCrossingDetection::imageCallback(const sensor_msgs::ImageConstPtr &im
 }
 
 bool StreetCrossingDetection::findStartline() {
-  std::vector<cv::Point2f> linePoints;
-  SearchLine mySl;
+  SearchLine slRightLane;
+//  SearchLine slLeftLane;
 
   // use search-line to find stop-line
-  mySl.iStart = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .4);
-  mySl.iEnd = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .8);
+  slRightLane.iStart = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .4);
+  slRightLane.iEnd = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .8);
+
+//  slLeftLane.iStart = cv::Point2f(currentImage_->cols / 8 * 3, currentImage_->rows * .4);
+//  slLeftLane.iEnd = cv::Point2f(currentImage_->cols / 4, currentImage_->rows * .8);
+//    slRightLane.iStart = cv::Point2f(currentImage_->cols * .55, currentImage_->rows * .4);
+//    slRightLane.iEnd = cv::Point2f(currentImage_->cols * .55, currentImage_->rows * .8);
+
+//    slLeftLane.iStart = cv::Point2f(currentImage_->cols * .45, currentImage_->rows * .4);
+//    slLeftLane.iEnd = cv::Point2f(currentImage_->cols * .45, currentImage_->rows * .8);
 
   // find line using unified header
   search_direction search_dir = search_direction::y;
   search_method search_meth = search_method::sobel;
   std::vector<cv::Point> image_points;
   std::vector<int> line_widths;
-  image_operator_.findByLineSearch(mySl,*currentImage_,search_dir,search_meth,image_points,line_widths);
+  image_operator_.findByLineSearch(slRightLane,*currentImage_,search_dir,search_meth,image_points,line_widths);
+//  image_operator_.findByLineSearch(slLeftLane,*currentImage_,search_dir,search_meth,image_points,line_widths);
+  if(image_points.empty()) {
+    startLineCounter_ = 0;
+  } else {
+    startLineCounter_++;
+    if(image_points.size() > 1) {
+      ROS_INFO("Found more than one start/stop line");
+    }
+  }
 #if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
   cv::Mat debug_image;
   cv::cvtColor(*currentImage_, debug_image, CV_GRAY2RGB);
-  cv::line(debug_image, mySl.iStart, mySl.iEnd, cv::Scalar(255,255,255));
-  for (auto point: image_points) {
-    cv::circle(debug_image,point,2,cv::Scalar(0,255,0),2);
+  cv::line(debug_image, slRightLane.iStart, slRightLane.iEnd, cv::Scalar(255, 255, 255), 2);
+//  cv::line(debug_image, slLeftLane.iStart, slLeftLane.iEnd, cv::Scalar(255, 255, 255), 2);
+  if(startLineCounter_ > 0) {
+    for (auto point: image_points) {
+      cv::circle(debug_image,point,2,cv::Scalar(0,255,0),3);
+    }
   }
 #endif
 #ifdef DRAW_DEBUG
@@ -78,7 +100,7 @@ bool StreetCrossingDetection::findStartline() {
   cv::waitKey(1);
 #endif
 #ifdef PUBLISH_DEBUG
-  debugImagePublisher.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, debugImage).toImageMsg());
+  debugImagePublisher.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, debug_image).toImageMsg());
 #endif
 
   // test array of lines
