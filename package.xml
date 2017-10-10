@@ -51,8 +51,7 @@
   <build_depend>geometry_msgs</build_depend>
   <build_depend>tf</build_depend>
   <build_depend>message_filters</build_depend>
-<!--  temp include to expedite transtition of road_detection -> todo: move to common message storage, not created yet-->
-  <build_depend>message_generation</build_depend>
+  <build_depend>drive_ros_msgs</build_depend>
 
   <run_depend>cv_bridge</run_depend>
   <run_depend>image_transport</run_depend>
@@ -65,8 +64,7 @@
   <run_depend>geometry_msgs</run_depend>
   <run_depend>tf</run_depend>
   <run_depend>message_filters</run_depend>
-  <!--  temp include to expedite transtition of road_detection -> todo: move to common message storage, not created yet-->
-  <run_depend>message_runtime</run_depend>
+  <run_depend>drive_ros_msgs</run_depend>
 
   <export>
     <nodelet plugin="${prefix}/nodelets.xml" />

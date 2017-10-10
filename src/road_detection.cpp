@@ -94,7 +94,7 @@ bool RoadDetection::init() {
 
   img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
 
-  line_output_pub_ = pnh_.advertise<drive_ros_image_recognition::RoadLane>("line_out",10);
+  line_output_pub_ = pnh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
 
 #ifdef PUBLISH_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);
@@ -124,7 +124,7 @@ void RoadDetection::debugImageCallback(const sensor_msgs::ImageConstPtr& img_in)
   image_operator_.debugPointsImage((*current_image_)(roi), search_dir, search_meth_brightness);
 }
 
-void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const RoadLaneConstPtr& road_in){
+void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in){
   current_image_ = convertImageMessage(img_in);
   road_points_buffer_ = road_in->points;
 
@@ -365,7 +365,7 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
   }
 
   // todo: check how this gets handled and adjust the interface
-  drive_ros_image_recognition::RoadLane lane_out;
+  drive_ros_msgs::RoadLane lane_out;
   lane_out.header.stamp = ros::Time::now();
   geometry_msgs::Point32 point_temp;
   point_temp.z = 0.f;
@@ -374,7 +374,7 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
     point_temp.y = point.y;
     lane_out.points.push_back(point_temp);
   }
-  lane_out.roadStateType = drive_ros_image_recognition::RoadLane::UNKNOWN;
+  lane_out.roadStateType = drive_ros_msgs::RoadLane::UNKNOWN;
   line_output_pub_.publish(lane_out);
 }
 

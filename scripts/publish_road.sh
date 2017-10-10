@@ -1,5 +1,5 @@
 # simple publisher for road messages to be able to view what happens during processing
-rostopic pub /road_trajectory drive_ros_image_recognition/RoadLane "header:
+rostopic pub /road_trajectory drive_ros_msgs/RoadLane "header:
   seq: 0
   stamp:
     secs: 0
