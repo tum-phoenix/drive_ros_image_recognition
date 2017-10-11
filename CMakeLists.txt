@@ -115,7 +115,7 @@ add_executable(warp_image_node
     src/warp_image.cpp
     )
 
-add_dependencies(warp_image_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(warp_image_node ${drive_ros_msgs_generate_messages_cpp} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(warp_image_node
     ${catkin_LIBRARIES}
@@ -135,7 +135,7 @@ add_library(warp_image_nodelet
     src/warp_image.cpp
     )
 
-add_dependencies(warp_image_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(warp_image_nodelet ${drive_ros_msgs_generate_messages_cpp} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(warp_image_nodelet
     ${catkin_LIBRARIES}
