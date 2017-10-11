@@ -7,15 +7,17 @@ WarpContent::WarpContent(const ros::NodeHandle& nh, const ros::NodeHandle& pnh):
   nh_(nh),
   pnh_(pnh),
   current_image_(),
-  world2cam_(3,3,CV_64F,cv::Scalar(0.0)),
-  cam2world_(3,3,CV_64F,cv::Scalar(0.0)),
   cam_mat_(3,3,CV_64F,cv::Scalar(0.0)),
   dist_coeffs_(8,1,CV_64F,cv::Scalar(0.0)),
   it_(pnh),
   cam_sub_(),
   worldToImageServer_(),
   imageToWorldServer_(),
-  cam_model_()
+  cam_model_(),
+  homography_params_sub_(),
+  cam2world_(3,3,CV_64FC1,cv::Scalar(0.0)),
+  world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
+  homo_received_(false)
 {
   img_pub_ = it_.advertise("warped_out", 1);
   undistort_pub_ = it_.advertise("undistort_out", 1);
@@ -33,11 +35,18 @@ bool WarpContent::init() {
 
   // initialize combined subscriber for camera image and model
   cam_sub_ = it_.subscribeCamera("img_in", 10, &WarpContent::world_image_callback, this);
+
+  homography_params_sub_ = pnh_.subscribe("homography_in", 1, &WarpContent::homography_callback, this);
   return true;
 }
 
 void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
                                        const sensor_msgs::CameraInfoConstPtr& info_msg) {
+  if (!homo_received_) {
+    ROS_WARN_THROTTLE(10, "Homography callback not yet received, waiting");
+    return;
+  }
+
   try
   {
     // copy
@@ -66,8 +75,32 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
   //  cv::warpPerspective(current_image_, current_image_, S*world2cam_*S.inv(), current_image_.size(),cv::WARP_INVERSE_MAP);
 
   // flag ensures that we directly use the matrix, as it is done in LMS
-//  cv::warpPerspective(undistorted_mat, undistorted_mat, world2cam_, current_image_.size(),cv::WARP_INVERSE_MAP);
+  cv::warpPerspective(undistorted_mat, undistorted_mat, world2cam_, current_image_.size(),cv::WARP_INVERSE_MAP);
 //  img_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
+}
+
+// bind cannot resolve to references
+void WarpContent::homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_in) {
+  if (!homo_received_)
+    homo_received_ = true;
+
+  ROS_ASSERT(homo_in->cam2world.layout.dim[0].size == 3 && homo_in->cam2world.layout.dim[1].size == 3 );
+  cam2world_ = cv::Mat::zeros(3,3,CV_64FC1);
+  int k=0;
+  for (int i=0; i<homo_in->cam2world.layout.dim[0].size; i++){
+    for (int j=0; j<homo_in->cam2world.layout.dim[1].size; j++){
+      cam2world_.at<double>(i,j) = homo_in->cam2world.data[k++];
+    }
+  }
+
+  ROS_ASSERT(homo_in->world2cam.layout.dim[0].size == 3 && homo_in->world2cam.layout.dim[1].size == 3 );
+  world2cam_ = cv::Mat::zeros(3,3,CV_64FC1);
+  k=0;
+  for (int i=0; i<homo_in->world2cam.layout.dim[0].size; i++){
+    for (int j=0; j<homo_in->world2cam.layout.dim[1].size; j++){
+      world2cam_.at<double>(i,j) = homo_in->world2cam.data[k++];
+    }
+  }
 }
 
 void WarpImageNodelet::onInit()

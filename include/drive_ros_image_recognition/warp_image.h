@@ -18,15 +18,13 @@ public:
   WarpContent(const ros::NodeHandle &nh, const ros::NodeHandle& pnh);
   ~WarpContent();
   bool init();
+  void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_in);
 private:
   void world_image_callback(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::CameraInfoConstPtr& info_msg);
   ros::NodeHandle pnh_;
   ros::NodeHandle nh_;
   cv::Mat current_image_;
   // needs two components: camera model and homography for transformation
-  // homography matrices for transformation
-  cv::Mat world2cam_;
-  cv::Mat cam2world_;
   // camera model matrix and distortion coefficients
   cv::Mat cam_mat_;
   cv::Mat dist_coeffs_;
@@ -39,6 +37,12 @@ private:
   ros::ServiceServer imageToWorldServer_;
   // todo: moving to camera model subscription
   image_geometry::PinholeCameraModel cam_model_;
+
+  // homography components
+  ros::Subscriber homography_params_sub_;
+  cv::Mat world2cam_;
+  cv::Mat cam2world_;
+  bool homo_received_;
 };
 
 class WarpImageNodelet : public nodelet::Nodelet {

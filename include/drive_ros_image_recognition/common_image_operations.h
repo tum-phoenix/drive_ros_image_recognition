@@ -8,6 +8,7 @@
 #include <tf/transform_listener.h>
 #include <drive_ros_image_recognition/LineDetectionConfig.h>
 #include <sensor_msgs/CameraInfo.h>
+#include <drive_ros_msgs/Homography.h>
 
 typedef boost::shared_ptr<cv::Mat> CvImagePtr;
 
@@ -425,8 +426,10 @@ public:
                          ) {
     std::vector<cv::Point> image_points;
     std::vector<int> image_widths;
+#ifdef DRAW_DEBUG
     cv::Mat debug_image;
     cv::cvtColor(current_image, debug_image, CV_GRAY2RGB);
+#endif
 
     int search_steps = 6;
     int pixel_step = 50;
@@ -439,7 +442,9 @@ public:
         lines[it].iStart = cv::Point(it*pixel_step, 0);
         lines[it].iEnd = cv::Point(it*pixel_step, current_image.rows);
       }
+#ifdef DRAW_DEBUG
       cv::line(debug_image, lines[it].iStart, lines[it].iEnd, cv::Scalar(255,255,255));
+#endif
       findByLineSearch(lines[it],
                        current_image,
                        search_dir,
@@ -447,9 +452,11 @@ public:
                        image_points,
                        image_widths
                        );
+#ifdef DRAW_DEBUG
       for (auto point: image_points) {
         cv::circle(debug_image,point,2,cv::Scalar(0,255,0),2);
       }
+#endif
     }
 #ifdef DRAW_DEBUG
     if (search_meth == search_method::sobel) {
