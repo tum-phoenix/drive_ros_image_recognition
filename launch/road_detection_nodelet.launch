@@ -13,9 +13,7 @@
             <remap from="~/road_in" to="$(arg road_trajectory_topic)"/>
             <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
             <remap from="car" to "car_out"/> -->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
-            <!--we need this for image-world transformations-->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography_matrix.yaml"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/road_detection.yaml"/>
         </node>
     </group>
 
@@ -26,9 +24,7 @@
             <remap from="~/road_in" to="$(arg road_trajectory_topic)"/>
             <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
             <remap from="car" to "car_out"/> -->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
-            <!--we need this for image-world transformations-->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography_matrix.yaml"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/road_detection.yaml"/>
         </node>
     </group>
 </launch>
