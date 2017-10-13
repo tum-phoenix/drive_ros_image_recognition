@@ -8,8 +8,6 @@
 
         <node pkg="nodelet" type="nodelet" name="street_crossing_detection_nodelet" args="load drive_ros_image_recognition/StreetCrossingDetectionNodelet street_crossing_nodelet_manager" output="screen">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
-            <!--we need this for image-world transformations-->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
         </node>
     </group>
 
@@ -18,8 +16,6 @@
 
         <node pkg="nodelet" type="nodelet" name="street_crossing_detection_nodelet" args="load drive_ros_image_recognition/StreetCrossingDetectionNodelet street_crossing_nodelet_manager" output="screen">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
-            <!--we need this for image-world transformations-->
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/homography_matrix.yaml"/>
         </node>
     </group>
 
