@@ -36,32 +36,34 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
   return cv_ptr;
 }
 
-
 namespace drive_ros_image_recognition {
+
+inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_in, cv::Mat& cam2world, cv::Mat& world2cam,
+                         bool& homography_received) {
+  if (!homography_received)
+    homography_received = true;
+
+  ROS_ASSERT(homo_in->cam2world.layout.dim[0].size == 3 && homo_in->cam2world.layout.dim[1].size == 3 );
+  cam2world = cv::Mat::zeros(3,3,CV_64FC1);
+  int k=0;
+  for (int i=0; i<homo_in->cam2world.layout.dim[0].size; i++){
+    for (int j=0; j<homo_in->cam2world.layout.dim[1].size; j++){
+      cam2world.at<double>(i,j) = homo_in->cam2world.data[k++];
+    }
+  }
+
+  ROS_ASSERT(homo_in->world2cam.layout.dim[0].size == 3 && homo_in->world2cam.layout.dim[1].size == 3 );
+  world2cam = cv::Mat::zeros(3,3,CV_64FC1);
+  k=0;
+  for (int i=0; i<homo_in->world2cam.layout.dim[0].size; i++){
+    for (int j=0; j<homo_in->world2cam.layout.dim[1].size; j++){
+      world2cam.at<double>(i,j) = homo_in->world2cam.data[k++];
+    }
+  }
+}
 
 inline void cam_info_sub(const sensor_msgs::CameraInfoConstPtr& incoming_cam_info, image_geometry::PinholeCameraModel& cam_model) {
   cam_model.fromCameraInfo(incoming_cam_info);
-}
-
-inline bool getHomographyMatParam(const ros::NodeHandle& pnh, cv::Mat mat, const std::string mat_param) {
-  // retrieve world2map and map2world homography matrices
-  std::vector<double> temp_vals(9);
-
-  if (!pnh.getParam("homography_matrix/"+mat_param, temp_vals)) {
-    ROS_ERROR("Unable to load homography matrix %s from configuration file!", mat_param.c_str());
-    return false;
-  }
-  if (temp_vals.size() != 9) {
-    ROS_ERROR("Retreived homography matrix %s does not have 9 values", mat_param.c_str());
-    return false;
-  }
-  // update values
-  mat = cv::Mat::zeros(3,3,CV_64F);
-  for(unsigned i=0; i < temp_vals.size(); i++) {
-    mat.at<double>(i) = temp_vals[i];
-  }
-  ROS_DEBUG_STREAM("Paramater matrix loaded as: "<<mat);
-  return true;
 }
 
 enum search_direction {
@@ -91,12 +93,12 @@ public:
 
   TransformHelper():
     tf_listener_(),
-  #ifdef USE_WORLD2CAM_HOMOGRAPHY
-    world2cam_(),
-  #endif
+    world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
     cam_model_(),
-    cam2world_(),
-    cam_info_sub_()
+    cam2world_(3,3,CV_64FC1,cv::Scalar(0.0)),
+    cam_info_sub_(),
+    homography_received_(false),
+    homography_sub_()
   {
   }
 
@@ -104,15 +106,17 @@ public:
   {
     std::swap(cam_model_, other.cam_model_);
     std::swap(cam2world_, other.cam2world_);
-    // tf listener also not swappable, should auto-initialize
-#ifdef USE_WORLD2CAM_HOMOGRAPHY
+    // tf listener is not swappable, should auto-initialize
+
     std::swap(world2cam_, other.world2cam_);
-#endif
     // cannot swap subscriber, need to bind to new object
-    ros::NodeHandle pnh("~");
-    cam_info_sub_ = pnh.subscribe<sensor_msgs::CameraInfo>("/camera1/camera_info", 1,
+    cam_info_sub_ = ros::NodeHandle().subscribe<sensor_msgs::CameraInfo>("camera_info", 1,
                                                            boost::bind(&cam_info_sub, _1,
                                                                        getCameraModelReference()) );
+
+    homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
+                                                                           boost::bind(homography_callback, _1,
+                                                                                       cam2world_, world2cam_, homography_received_));
     other.cam_info_sub_.shutdown();
     return *this;
   }
@@ -122,25 +126,19 @@ public:
     tf_listener_()
   {
     cam2world_ = helper.cam2world_;
-#ifdef USE_WORLD2CAM_HOMOGRAPHY
     world2cam_ = helper.world2cam_;
-#endif
     cam_model_ = helper.cam_model_;
-    ros::NodeHandle pnh("~");
-    cam_info_sub_ = pnh.subscribe<sensor_msgs::CameraInfo>("/camera1/camera_info", 1,
+    cam_info_sub_ = ros::NodeHandle().subscribe<sensor_msgs::CameraInfo>("camera_info", 1,
                                                            boost::bind(&cam_info_sub, _1,
                                                                        getCameraModelReference()) );
+    homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
+                                                                           boost::bind(homography_callback, _1,
+                                                                                       cam2world_, world2cam_, homography_received_));
   }
 
-  TransformHelper(const cv::Mat& cam2world, const image_geometry::PinholeCameraModel& cam_model
-                #ifdef USE_WORLD2CAM_HOMOGRAPHY
-                  const cv::Mat& world2cam
-                #endif
-                  ):
-    cam2world_(cam2world),
-  #ifdef USE_WORLD2CAM_HOMOGRAPHY
-    world2cam_(world2cam),
-  #endif
+  TransformHelper(const image_geometry::PinholeCameraModel& cam_model):
+    cam2world_(3,3,CV_64FC1,cv::Scalar(0.0)),
+    world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
     cam_model_(cam_model),
     tf_listener_(),
     cam_info_sub_()
@@ -150,19 +148,14 @@ public:
   ~TransformHelper() {
   }
 
-  bool init(ros::NodeHandle& pnh) {
-#ifdef USE_WORLD2CAM_HOMOGRAPHY
-    if (!getHomographyMatParam(pnh, world2cam_, "world2cam"))
-      return false;
-#endif
-
-    if (!getHomographyMatParam(pnh, cam2world_, "cam2world"))
-      return false;
-
+  bool init() {
     // subscribe Camera model to TransformHelper-> this is kind of hacky, but should keep the camera model on the transform helper updated
-    cam_info_sub_ = pnh.subscribe<sensor_msgs::CameraInfo>("/camera1/camera_info", 1,
+    cam_info_sub_ = ros::NodeHandle().subscribe<sensor_msgs::CameraInfo>("camera_info", 1,
                                                            boost::bind(&cam_info_sub, _1,
                                                                        getCameraModelReference()) );
+    homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
+                                                                           boost::bind(homography_callback, _1,
+                                                                                       cam2world_, world2cam_, homography_received_));
   }
 
   void setCamModel(const image_geometry::PinholeCameraModel& cam_model) {
@@ -171,16 +164,15 @@ public:
 
   bool worldToImage(const cv::Point3f& world_point,
                     cv::Point& image_point) {
-#ifdef USE_WORLD2CAM_HOMOGRAPHY
-    // using homography instead of camera model
-    cv::perspectiveTransform(world_point, image_point, world2cam_);
-    if (point_world.rows != 1 || point_world.cols != 1) {
-      ROS_WARN("Point transformed to image dimensions has invalid dimensions");
-      return false;
-    }
-#else
-    image_point = cam_model_.project3dToPixel(world_point);
-#endif
+    // transform to image point and then repeat homography transform
+    cv::Point2d pixel_coords = cam_model_.project3dToPixel(world_point);
+    cv::Mat mat_pixel_coords(1,1,CV_64FC2,cv::Scalar(0.0));
+    mat_pixel_coords.at<double>(0,0) = pixel_coords.x;
+    mat_pixel_coords.at<double>(0,1) = pixel_coords.y;
+    cv::Mat mat_image_point(1,1,CV_64FC2,cv::Scalar(0.0));
+    cv::perspectiveTransform(mat_pixel_coords, mat_image_point, world2cam_);
+    // todo: check if we lose precision here
+    image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
     return true;
   }
 
@@ -189,14 +181,16 @@ public:
   }
 
   bool imageToWorld(const cv::Point& image_point, cv::Point2f& world_point) {
-    cv::Mat mat_point_image(1,1,CV_64FC2);
+    cv::Mat mat_point_image(1,1,CV_64FC2,cv::Scalar(0.0));
     mat_point_image.at<double>(0,0) = image_point.x;
     mat_point_image.at<double>(0,1) = image_point.y;
-    cv::Mat mat_point_world(1,1,CV_64FC2);
+    cv::Mat mat_point_world(1,1,CV_64FC2,cv::Scalar(0.0));
     cv::perspectiveTransform(mat_point_image, mat_point_world, cam2world_);
     cv::Point2f cam_point(mat_point_world.at<float>(0,0),mat_point_world.at<float>(0,1));
 
-    // todo: check if it is valid to assume the z depth if we used homography before
+    // this returns a point with z=1, the pixel is on a ray from origin to this point
+    // todo: set correct camera height and use it to calculate x and y of the world point
+    double cam_height = 10.0;
     cv::Point3d cam_ray_point = cam_model_.projectPixelTo3dRay(cam_point);
 
     geometry_msgs::PointStamped camera_point;
@@ -225,25 +219,23 @@ public:
     cam2world_ = cam2world;
   }
 
+  void setworld2camMat(const cv::Mat& world2cam) {
+    world2cam_ = world2cam;
+  }
+
   // to subscribe to camerainfo messages
   image_geometry::PinholeCameraModel& getCameraModelReference() {
     return cam_model_;
   }
 
-#ifdef USE_WORLD2CAM_HOMOGRAPHY
-  void setworld2camMat(const cv::Mat& world2cam) {
-    world2cam_ = world2cam;
-  }
-#endif
-
 private:
   image_geometry::PinholeCameraModel cam_model_;
+  bool homography_received_;
   cv::Mat cam2world_;
-  tf::TransformListener tf_listener_;
-#ifdef USE_WORLD2CAM_HOMOGRAPHY
   cv::Mat world2cam_;
-#endif
+  tf::TransformListener tf_listener_;
   ros::Subscriber cam_info_sub_;
+  ros::Subscriber homography_sub_;
 }; // class TransformHelper
 
 class ImageOperator {

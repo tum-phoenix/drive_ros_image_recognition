@@ -80,7 +80,7 @@ bool RoadDetection::init() {
     ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<useWeights_);
   }
 
-  transform_helper_.init(pnh_);
+  transform_helper_.init();
   image_operator_ = ImageOperator(transform_helper_);
 
   dsrv_server_.setCallback(dsrv_cb_);
