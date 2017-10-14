@@ -1,7 +1,7 @@
 <launch>
     <arg name="road_trajectory_topic" default="/road_trajectory"/>
     <arg name="incoming_image" default="/camera/image_raw"/>
-    <arg name="camera_info" default="/camera1/camera_info"/>
+    <arg name="camera_info" default="/camera/camera_info"/>
 
     <node name="road_detection" pkg="drive_ros_image_recognition" type="road_detection_node" respawn="false" output="screen">
         <remap from="~/img_in" to="$(arg incoming_image)"/>
