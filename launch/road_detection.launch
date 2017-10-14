@@ -1,10 +1,12 @@
 <launch>
     <arg name="road_trajectory_topic" default="/road_trajectory"/>
     <arg name="incoming_image" default="/camera/image_raw"/>
+    <arg name="camera_info" default="/camera1/camera_info"/>
 
     <node name="road_detection" pkg="drive_ros_image_recognition" type="road_detection_node" respawn="false" output="screen">
         <remap from="~/img_in" to="$(arg incoming_image)"/>
         <remap from="~/road_in" to="$(arg road_trajectory_topic)"/>
+        <remap from="camera_info" to="$(arg camera_info)">
         <!-- todo: car command output channel, as we have not decided on the interface yet, will comment for now
         <remap from="car" to "car_out"/> -->
         <rosparam command="load" file="$(find drive_ros_image_recognition)/road_detection.yaml"/>

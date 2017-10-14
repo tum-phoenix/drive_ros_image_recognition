@@ -29,7 +29,7 @@ StreetCrossingDetection::~StreetCrossingDetection() {
 bool StreetCrossingDetection::init() {
   dsrv_server_.setCallback(dsrv_cb_);
 
-  transform_helper_.init(pnh_);
+  transform_helper_.init();
   image_operator_ = ImageOperator(transform_helper_);
 
   imageSubscriber_ = imageTransport_.subscribe("img_in", 10, &StreetCrossingDetection::imageCallback, this);
