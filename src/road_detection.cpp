@@ -20,7 +20,7 @@ RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
   translateEnvironment_(false),
   useWeights_(false),
   line_output_pub_(),
-  it_(pnh),
+  it_(nh),
 #ifdef PUBLISH_DEBUG
   debug_img_pub_(),
   detected_points_pub_(),

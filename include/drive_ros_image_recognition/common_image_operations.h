@@ -116,7 +116,7 @@ public:
 
     homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
                                                                            boost::bind(homography_callback, _1,
-                                                                                       cam2world_, world2cam_, homography_received_));
+                                                                                       std::ref(cam2world_), std::ref(world2cam_), std::ref(homography_received_)));
     other.cam_info_sub_.shutdown();
     return *this;
   }
@@ -192,6 +192,9 @@ public:
     // todo: set correct camera height and use it to calculate x and y of the world point
     double cam_height = 10.0;
     cv::Point3d cam_ray_point = cam_model_.projectPixelTo3dRay(cam_point);
+    cam_ray_point.x = cam_ray_point.x*cam_height;
+    cam_ray_point.y = cam_ray_point.y*cam_height;
+    cam_ray_point.z = cam_height;
 
     geometry_msgs::PointStamped camera_point;
     camera_point.header.frame_id = cam_model_.tfFrame();
