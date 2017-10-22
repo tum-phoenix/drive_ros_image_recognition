@@ -94,7 +94,7 @@ bool RoadDetection::init() {
 
   img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
 
-  line_output_pub_ = pnh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
+  line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
 
 #ifdef PUBLISH_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);

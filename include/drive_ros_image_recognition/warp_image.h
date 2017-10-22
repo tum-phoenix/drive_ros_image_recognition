@@ -41,6 +41,8 @@ private:
   ros::Subscriber homography_params_sub_;
   cv::Mat world2cam_;
   cv::Mat cam2world_;
+  cv::Mat scaling_mat_;
+  cv::Size transformed_size_;
   bool homo_received_;
 };
 

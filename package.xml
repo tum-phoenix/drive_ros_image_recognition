@@ -50,7 +50,6 @@
   <build_depend>nodelet</build_depend>
   <build_depend>geometry_msgs</build_depend>
   <build_depend>tf</build_depend>
-  <build_depend>message_filters</build_depend>
   <build_depend>drive_ros_msgs</build_depend>
 
   <run_depend>cv_bridge</run_depend>
@@ -63,7 +62,6 @@
   <run_depend>nodelet</run_depend>
   <run_depend>geometry_msgs</run_depend>
   <run_depend>tf</run_depend>
-  <run_depend>message_filters</run_depend>
   <run_depend>drive_ros_msgs</run_depend>
 
   <export>
