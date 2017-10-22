@@ -17,6 +17,7 @@
             <remap from="homography_in" to="$(arg homography_topic)"/>
              <!-- debug: undistored camera image (not warped) -->
             <remap from="undistort_out" to="$(arg undistort_out)"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>
 
@@ -31,6 +32,7 @@
             <remap from="homography_in" to="$(arg homography_topic)"/>
              <!-- debug: undistored camera image (not warped) -->
             <remap from="undistort_out" to="$(arg undistort_out)"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>
 </launch>

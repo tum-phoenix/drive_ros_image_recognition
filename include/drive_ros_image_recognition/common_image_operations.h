@@ -39,7 +39,7 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
 namespace drive_ros_image_recognition {
 
 inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_in, cv::Mat& cam2world, cv::Mat& world2cam,
-                         bool& homography_received) {
+                                cv::Mat& scaling_mat, bool& homography_received) {
   if (!homography_received)
     homography_received = true;
 
@@ -60,6 +60,8 @@ inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_i
       world2cam.at<double>(i,j) = homo_in->world2cam.data[k++];
     }
   }
+
+  scaling_mat = world2cam*scaling_mat;
 }
 
 inline void cam_info_sub(const sensor_msgs::CameraInfoConstPtr& incoming_cam_info, image_geometry::PinholeCameraModel& cam_model) {
@@ -114,9 +116,10 @@ public:
                                                            boost::bind(&cam_info_sub, _1,
                                                                        getCameraModelReference()) );
 
-    homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
-                                                                           boost::bind(homography_callback, _1,
-                                                                                       std::ref(cam2world_), std::ref(world2cam_), std::ref(homography_received_)));
+//    homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
+//                                                                           boost::bind(homography_callback, _1,
+//                                                                                       std::ref(cam2world_), std::ref(world2cam_),
+//                                                                                       std::ref(scaling_mat_), std::ref(homography_received_)));
     other.cam_info_sub_.shutdown();
     return *this;
   }
@@ -133,12 +136,15 @@ public:
                                                                        getCameraModelReference()) );
     homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
                                                                            boost::bind(homography_callback, _1,
-                                                                                       cam2world_, world2cam_, homography_received_));
+                                                                                       std::ref(cam2world_), std::ref(world2cam_),
+                                                                                       std::ref(scaling_mat_), std::ref(homography_received_)));
   }
 
   TransformHelper(const image_geometry::PinholeCameraModel& cam_model):
     cam2world_(3,3,CV_64FC1,cv::Scalar(0.0)),
     world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
+    scaling_mat_(3,3,CV_64FC1,cv::Scalar(0.0)),
+    transformed_size_(0,0),
     cam_model_(cam_model),
     tf_listener_(),
     cam_info_sub_()
@@ -149,13 +155,33 @@ public:
   }
 
   bool init() {
+    ros::NodeHandle pnh = ros::NodeHandle("~");
+    std::vector<double> world_size;
+    if(!pnh.getParam("world_size", world_size)) {
+       ROS_ERROR("Unable to load parameter world_size!");
+       return false;
+    }
+    ROS_ASSERT(world_size.size() == 2);
+    std::vector<double> image_size;
+    if(!pnh.getParam("image_size", image_size)) {
+      ROS_ERROR("Unable to load parameter world_size!");
+      return false;
+    }
+    ROS_ASSERT(image_size.size() == 2);
+    transformed_size_ = cv::Size(image_size[0],image_size[1]);
+    scaling_mat_.at<double>(0,0) = world_size[0]/image_size[0];
+    scaling_mat_.at<double>(1,1) = -world_size[1]/image_size[1];
+    scaling_mat_.at<double>(1,2) = world_size[1]/2;
+    scaling_mat_.at<double>(2,2) = 1.0;
+
     // subscribe Camera model to TransformHelper-> this is kind of hacky, but should keep the camera model on the transform helper updated
     cam_info_sub_ = ros::NodeHandle().subscribe<sensor_msgs::CameraInfo>("camera_info", 1,
                                                            boost::bind(&cam_info_sub, _1,
                                                                        getCameraModelReference()) );
     homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
                                                                            boost::bind(homography_callback, _1,
-                                                                                       cam2world_, world2cam_, homography_received_));
+                                                                                       std::ref(cam2world_), std::ref(world2cam_),
+                                                                                       std::ref(scaling_mat_), std::ref(homography_received_)));
   }
 
   void setCamModel(const image_geometry::PinholeCameraModel& cam_model) {
@@ -236,6 +262,8 @@ private:
   bool homography_received_;
   cv::Mat cam2world_;
   cv::Mat world2cam_;
+  cv::Mat scaling_mat_;
+  cv::Size transformed_size_;
   tf::TransformListener tf_listener_;
   ros::Subscriber cam_info_sub_;
   ros::Subscriber homography_sub_;
