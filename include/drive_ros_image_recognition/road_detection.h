@@ -77,11 +77,16 @@ class RoadDetection {
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig>::CallbackType dsrv_cb_;
     void debugImageCallback(const sensor_msgs::ImageConstPtr& img_in);
+    void debugDrawFrameCallback(const sensor_msgs::ImageConstPtr& img_in,
+                                const std::string camera_frame,
+                                const std::string draw_frame);
     void syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in);
     void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
     bool find();
     void processSearchLine(const SearchLine &line);
-    TransformHelper transform_helper_;
+#ifdef PUBLISH_WORLD_POINTS
+    ros::Publisher world_point_pub;
+#endif
     ImageOperator image_operator_;
 
 public:
