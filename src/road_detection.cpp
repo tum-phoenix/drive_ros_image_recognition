@@ -32,9 +32,11 @@ RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
   linesToProcess_(0),
   current_image_(),
   road_points_buffer_(),
-  transform_helper_(),
   image_operator_(),
   img_sub_debug_()
+#ifdef PUBLISH_WORLD_POINTS
+  ,world_point_pub()
+#endif
 {
 }
 
@@ -80,10 +82,27 @@ bool RoadDetection::init() {
     ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<useWeights_);
   }
 
-  transform_helper_.init();
-  image_operator_ = ImageOperator(transform_helper_);
+  image_operator_ = ImageOperator();
+  image_operator_.init();
+
+  std::string world_frame("/rear_axis_middle");
+  if (!pnh_.getParam("world_frame", world_frame)) {
+    ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<world_frame);
+  }
+  image_operator_.setWorldFrame(world_frame);
+
+  // temporary solution until we set the correct frame
+  std::string camera_frame("/camera_optical");
+  if (!pnh_.getParam("camera_frame", camera_frame)) {
+    ROS_WARN_STREAM("Unable to load 'camera_frame' parameter, using default: "<<camera_frame);
+  }
+  image_operator_.setCameraFrame(camera_frame);
 
   dsrv_server_.setCallback(dsrv_cb_);
+
+#ifdef PUBLISH_WORLD_POINTS
+  world_point_pub = pnh_.advertise<geometry_msgs::PointStamped>("worldPoints", 1000);
+#endif
 
   // to synchronize incoming images and the road, we use message filters
 //  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 1000));
@@ -93,6 +112,8 @@ bool RoadDetection::init() {
 //  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
 
   img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
+//  img_sub_debug_ = it_.subscribe("img_in", 1000, boost::bind(&RoadDetection::debugDrawFrameCallback, this,
+//                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
 
   line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
 
@@ -101,7 +122,6 @@ bool RoadDetection::init() {
   detected_points_pub_ = it_.advertise("detected_points_out", 10);
   filtered_points_pub_ = it_.advertise("filtered_points_out", 10);
 #endif
-
 
   // todo: we have not decided on an interface for these debug channels yet
   //    debugAllPoints = writeChannel<lms::math::polyLine2f>("DEBUG_ALL_POINTS");
@@ -122,6 +142,39 @@ void RoadDetection::debugImageCallback(const sensor_msgs::ImageConstPtr& img_in)
   search_method search_meth_brightness = search_method::brightness;
   image_operator_.debugPointsImage((*current_image_)(roi), search_dir, search_meth);
   image_operator_.debugPointsImage((*current_image_)(roi), search_dir, search_meth_brightness);
+}
+
+// draws draw_frame in camera image (if visible)
+void RoadDetection::debugDrawFrameCallback(const sensor_msgs::ImageConstPtr& img_in,
+                                           const std::string camera_frame,
+                                           const std::string draw_frame) {
+  current_image_ = convertImageMessage(img_in);
+
+  tf::TransformListener tf_listener_;
+  tf::StampedTransform transform;
+  try {
+    ros::Duration timeout(1);
+    tf_listener_.waitForTransform(camera_frame, draw_frame,
+                                  ros::Time::now(), timeout);
+    tf_listener_.lookupTransform(camera_frame, draw_frame,
+                                 ros::Time::now(), transform);
+  }
+  catch (tf::TransformException& ex) {
+    ROS_WARN("[debugDrawFrameCallback] TF exception:\n%s", ex.what());
+    return;
+  }
+
+  tf::Point pt = transform.getOrigin();
+  cv::Point3f pt_cv(pt.x(), pt.y(), pt.z());
+  cv::Point uv;
+  image_operator_.worldToImage(pt_cv, uv);
+
+  cv::Mat draw_image;
+  cv::cvtColor(*current_image_, draw_image, cv::COLOR_GRAY2BGR);
+  cv::circle(draw_image, uv, 3, CV_RGB(255,0,0), -1);
+  cv::namedWindow("frame in image", CV_WINDOW_NORMAL);
+  cv::imshow("frame in image", draw_image);
+  cv::waitKey(1);
 }
 
 void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in){
@@ -204,14 +257,14 @@ bool RoadDetection::find(){
     //check if the part is valid (middle should be always visible)
 
     cv::Point l_w_start, l_w_end;
-    transform_helper_.worldToImage(l.wStart, l.iStart);
-    transform_helper_.worldToImage(l.wEnd, l.iEnd);
+    image_operator_.worldToImage(l.wStart, l.iStart);
+    image_operator_.worldToImage(l.wEnd, l.iEnd);
     cv::Rect img_rect(cv::Point(),cv::Point(current_image_->cols,current_image_->rows));
     // if the left side is out of the current view, use middle instead
     if(!img_rect.contains(l_w_start)){
       // try middle lane -> should always be in image
       l.wStart = cv::Point2f(it_mid->x(),it_mid->y());
-      transform_helper_.worldToImage(l.wMid, l.iStart);
+      image_operator_.worldToImage(l.wMid, l.iStart);
       if(img_rect.contains(l_w_start)){
         continue;
       }
@@ -220,8 +273,8 @@ bool RoadDetection::find(){
       l.wEnd = cv::Point2f(it_mid->x(),it_mid->y());
     }
 
-    transform_helper_.worldToImage(l.wStart,l.iStart);
-    transform_helper_.worldToImage(l.wEnd,l.iEnd);
+    image_operator_.worldToImage(l.wStart,l.iStart);
+    image_operator_.worldToImage(l.wEnd,l.iEnd);
     lines_.push_back(l);
     for(SearchLine &l:lines_){
       processSearchLine(l);
@@ -323,7 +376,7 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
     cv::Mat filtered_points_mat = current_image_->clone();
     cv::Point img_point;
     for (auto point : validPoints) {
-      transform_helper_.worldToImage(point, img_point);
+      image_operator_.worldToImage(point, img_point);
       cv::circle(filtered_points_mat, img_point, 2, cv::Scalar(255));
     }
 #ifdef DRAW_DEBUG

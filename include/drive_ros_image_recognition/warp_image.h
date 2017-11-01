@@ -42,6 +42,7 @@ private:
   cv::Mat world2cam_;
   cv::Mat cam2world_;
   cv::Mat scaling_mat_;
+  cv::Mat scaling_mat_inv_;
   cv::Size transformed_size_;
   bool homo_received_;
 };

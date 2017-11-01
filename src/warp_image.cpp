@@ -18,6 +18,7 @@ WarpContent::WarpContent(const ros::NodeHandle& nh, const ros::NodeHandle& pnh):
   cam2world_(3,3,CV_64FC1,cv::Scalar(0.0)),
   world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
   scaling_mat_(3,3,CV_64FC1,cv::Scalar(0.0)),
+  scaling_mat_inv_(3,3,CV_64FC1,cv::Scalar(0.0)),
   transformed_size_(0,0),
   homo_received_(false)
 {
@@ -55,7 +56,7 @@ bool WarpContent::init() {
   homography_params_sub_ = nh_.subscribe<drive_ros_msgs::Homography>("homography_in", 1,
                                           boost::bind(homography_callback, _1,
                                                       std::ref(cam2world_), std::ref(world2cam_), std::ref(scaling_mat_),
-                                                      std::ref(homo_received_)));
+                                                      std::ref(scaling_mat_inv_), std::ref(homo_received_)));
   // initialize combined subscriber for camera image and model
   cam_sub_ = it_.subscribeCamera("img_in", 10, &WarpContent::world_image_callback, this);
   return true;

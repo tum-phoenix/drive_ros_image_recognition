@@ -5,11 +5,13 @@ project(drive_ros_image_recognition)
 SET(CMAKE_BUILD_TYPE Debug)
 
 # enable to compile with OpenCV window displays
-#add_definitions(-DDRAW_DEBUG)
+add_definitions(-DDRAW_DEBUG)
 # enable to compile with publishers of internally processed images
 #add_definitions(-DPUBLISH_DEBUG)
 # enable to use World2Cam homography
 #add_definitions(-DUSE_WORLD2CAM_HOMOGRAPHY)
+# enable publishing of detected points (for rviz display)
+#add_definitions(-DPUBLISH_WORLD_POINTS)
 
 add_definitions(-std=c++11)
 
