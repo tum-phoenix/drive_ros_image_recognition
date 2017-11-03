@@ -32,10 +32,10 @@ RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
   linesToProcess_(0),
   current_image_(),
   road_points_buffer_(),
-  image_operator_(),
-  img_sub_debug_()
+  image_operator_()
+,  img_sub_debug_()
 #ifdef PUBLISH_WORLD_POINTS
-  ,world_point_pub()
+  ,world_point_pub_()
 #endif
 {
 }
@@ -101,19 +101,20 @@ bool RoadDetection::init() {
   dsrv_server_.setCallback(dsrv_cb_);
 
 #ifdef PUBLISH_WORLD_POINTS
-  world_point_pub = pnh_.advertise<geometry_msgs::PointStamped>("worldPoints", 1000);
+  world_point_pub_ = pnh_.advertise<geometry_msgs::PointStamped>("worldPoints", 1000);
 #endif
 
   // to synchronize incoming images and the road, we use message filters
-//  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 1000));
-//  road_sub_.reset(new message_filters::Subscriber<RoadLane>(pnh_,"road_in", 1000));
-//  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(100), *img_sub_, *road_sub_));
-//  sync_->setAgePenalty(1.0);
+  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 1000));
+  road_sub_.reset(new message_filters::Subscriber<drive_ros_msgs::RoadLane>(pnh_,"road_in", 1000));
+  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(100), *img_sub_, *road_sub_));
+  sync_->setAgePenalty(1.0);
 //  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
 
-  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
-//  img_sub_debug_ = it_.subscribe("img_in", 1000, boost::bind(&RoadDetection::debugDrawFrameCallback, this,
-//                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
+  // Debug callbacks for testing
+//  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
+  img_sub_debug_ = it_.subscribe("img_in", 1000, boost::bind(&RoadDetection::debugDrawFrameCallback, this,
+                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
 
   line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
 
@@ -230,8 +231,8 @@ bool RoadDetection::find(){
 
   //create left/mid/right lane
   linestring mid, left, right;
-  for (auto point : road_points_buffer_) {
-    boost::geometry::append(mid,point_xy(point.x, point.y));
+  for (auto point_stamped : road_points_buffer_) {
+    boost::geometry::append(mid,point_xy(point_stamped.point.x, point_stamped.point.y));
   }
   // simplify mid (previously done with distance-based algorithm
   // skip this for now, can completely clear the line
@@ -420,11 +421,12 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
   // todo: check how this gets handled and adjust the interface
   drive_ros_msgs::RoadLane lane_out;
   lane_out.header.stamp = ros::Time::now();
-  geometry_msgs::Point32 point_temp;
-  point_temp.z = 0.f;
+  geometry_msgs::PointStamped point_temp;
+  point_temp.header.frame_id = std::string("/rear_axis_middle");
+  point_temp.point.z = 0.f;
   for (auto point: validPoints) {
-    point_temp.x = point.x;
-    point_temp.y = point.y;
+    point_temp.point.x = point.x;
+    point_temp.point.y = point.y;
     lane_out.points.push_back(point_temp);
   }
   lane_out.roadStateType = drive_ros_msgs::RoadLane::UNKNOWN;

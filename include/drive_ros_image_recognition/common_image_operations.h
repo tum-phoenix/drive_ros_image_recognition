@@ -105,7 +105,7 @@ class TransformHelper {
 
 public:
 
-  TransformHelper():
+  TransformHelper(bool use_homography = true):
     tf_listener_(),
     world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
     cam_model_(),
@@ -119,7 +119,8 @@ public:
     camera_model_received_(false),
     // temporary solution until have embedded correct frame in camerainfo messages (including the bag files)
     camera_frame_(""),
-    world_frame_("")
+    world_frame_(""),
+    use_homography_(use_homography)
   {
   }
 
@@ -182,7 +183,8 @@ public:
     camera_model_received_(false),
     // temporary solution until have embedded correct frame in camerainfo messages (including the bag files)
     camera_frame_(""),
-    world_frame_("")
+    world_frame_(""),
+    use_homography_(true)
   {
   }
 
@@ -275,8 +277,14 @@ public:
     mat_pixel_coords.at<double>(0,0) = pixel_coords.x;
     mat_pixel_coords.at<double>(0,1) = pixel_coords.y;
     cv::Mat mat_image_point(1,1,CV_64FC2,cv::Scalar(0.0));
-    cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_inv_);
-    image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
+    if (use_homography_) {
+      cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_inv_);
+      image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
+    }
+    else {
+      // nothing to transform if homography has not been applied
+      image_point = cv::Point(pixel_coords.x, pixel_coords.y);
+    }
     return true;
   }
 
@@ -297,7 +305,10 @@ public:
     std::vector<cv::Point2f> obj_corners(1);
     obj_corners[0] = cv::Point2f(image_point.x, image_point.y);
     std::vector<cv::Point2f> scene_corners(1);
-    cv::perspectiveTransform(obj_corners, scene_corners, scaling_mat_);
+    if (homography_received_)
+      cv::perspectiveTransform(obj_corners, scene_corners, scaling_mat_);
+    else
+      scene_corners[0] = obj_corners[0]; // no homography transforms if we use camera image directly
     // this returns a point with z=1, the pixel is on a ray from origin to this point
     cv::Point3d cam_ray_point = cam_model_.projectPixelTo3dRay(scene_corners[0]);
 
@@ -351,6 +362,7 @@ public:
 
 private:
   image_geometry::PinholeCameraModel cam_model_;
+  bool use_homography_;
   bool homography_received_;
   bool camera_model_received_;
   std::string world_frame_;
