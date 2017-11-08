@@ -50,63 +50,6 @@ include_directories(
     ${Boost_INCLUDE_DIRS}
     )
 
-
-################################################################################
-# road detection node (LMS port)
-################################################################################
-
-add_executable(road_detection_node
-    src/road_detection.cpp
-    src/road_detection_node.cpp
-    )
-
-add_dependencies(road_detection_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-target_link_libraries(road_detection_node
-    ${catkin_LIBRARIES}
-    ${OpenCV_LIBS}
-    ${Boost_LIBRARIES}
-    )
-
-install(TARGETS road_detection_node
-    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-    )
-
-if(CATKIN_ENABLE_TESTING)
-    find_package(rostest REQUIRED)
-    add_rostest_gtest(road_detection_node_test launch/road_detection.test
-        test/common_image_operations_test.cpp
-        test/road_detection_test.cpp
-        test/geometry_common_test.cpp
-        )
-    target_link_libraries(road_detection_node_test ${catkin_LIBRARIES})
-endif()
-
-
-################################################################################
-# road detection nodelet (LMS port)
-################################################################################
-
-add_library(road_detection_nodelet
-    src/road_detection.cpp
-    )
-
-add_dependencies(road_detection_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-target_link_libraries(road_detection_nodelet
-    ${catkin_LIBRARIES}
-    ${OpenCV_LIBS}
-    ${Boost_LIBRARIES}
-    )
-
-install(TARGETS road_detection_nodelet
-    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-    )
-
 ################################################################################
 # Warp image node
 ################################################################################
@@ -149,45 +92,23 @@ install(TARGETS warp_image_nodelet
     )
 
 ################################################################################
-# Street crossing detection nodelet (LMS port)
+# Line detection node
 ################################################################################
 
-add_library(street_crossing_nodelet
-    src/street_crossing.cpp
+add_executable(line_detection_node
+    src/line_detection.cpp
+    src/line_detection_node.cpp
     )
 
-add_dependencies(street_crossing_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(line_detection_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-target_link_libraries(street_crossing_nodelet
+target_link_libraries(line_detection_node
     ${catkin_LIBRARIES}
     ${OpenCV_LIBS}
     ${Boost_LIBRARIES}
     )
 
-install(TARGETS street_crossing_nodelet
-    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-    )
-
-################################################################################
-# Street crossing detection node (LMS port)
-################################################################################
-
-add_executable(street_crossing_node
-    src/street_crossing.cpp
-    src/street_crossing_node.cpp
-    )
-
-add_dependencies(street_crossing_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-target_link_libraries(street_crossing_node
-    ${catkin_LIBRARIES}
-    ${OpenCV_LIBS}
-    ${Boost_LIBRARIES}
-    )
-
-install(TARGETS street_crossing_node
+install(TARGETS line_detection_node
     ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

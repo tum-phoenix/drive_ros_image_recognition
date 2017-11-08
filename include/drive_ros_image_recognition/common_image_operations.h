@@ -39,10 +39,16 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
 namespace drive_ros_image_recognition {
 
 inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_in, cv::Mat& cam2world, cv::Mat& world2cam,
-                                cv::Mat& scaling_mat, cv::Mat& scaling_mat_inv, bool& homography_received) {
-  if (!homography_received)
-    homography_received = true;
+                                cv::Mat& scaling_mat, cv::Mat& scaling_mat_inv, cv::Mat& scaledCam2World, cv::Mat& scaledWorld2Cam,
+                                bool& homography_received) {
+  if (homography_received) {
+    // the homography will not change during runtime
+    return;
+  }
 
+  homography_received = true;
+
+  // extract cam2world matrix from the homography message
   ROS_ASSERT(homo_in->cam2world.layout.dim[0].size == 3 && homo_in->cam2world.layout.dim[1].size == 3 );
   cam2world = cv::Mat::zeros(3,3,CV_64FC1);
   int k=0;
@@ -52,6 +58,7 @@ inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_i
     }
   }
 
+  // extract world2cam matrix from the homography message
   ROS_ASSERT(homo_in->world2cam.layout.dim[0].size == 3 && homo_in->world2cam.layout.dim[1].size == 3 );
   world2cam = cv::Mat::zeros(3,3,CV_64FC1);
   k=0;
@@ -61,9 +68,14 @@ inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_i
     }
   }
 
-  ROS_INFO_STREAM("Scaling mat: "<<scaling_mat);
-  scaling_mat = world2cam*scaling_mat;
+  // we need the scaled matrices for the warped image (bird eye view)
   scaling_mat_inv = scaling_mat.inv();
+  scaledCam2World = scaling_mat_inv * cam2world;
+  scaledWorld2Cam = world2cam * scaling_mat;
+
+  ROS_INFO_STREAM("Scaling mat:\n" << scaling_mat);
+  ROS_INFO_STREAM("received cam2world:\n" << cam2world);
+  ROS_INFO_STREAM("received world2cam:\n" << world2cam);
 }
 
 inline void camInfo_callback(const sensor_msgs::CameraInfoConstPtr& incoming_cam_info, image_geometry::PinholeCameraModel& cam_model, bool& cam_info_received) {
@@ -144,6 +156,7 @@ public:
                                                                            boost::bind(homography_callback, _1,
                                                                                        std::ref(cam2world_), std::ref(world2cam_),
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
+                                                                                       std::ref(scaledCam2world_), std::ref(scaledWorld2cam_),
                                                                                        std::ref(homography_received_)));
 
     other.cam_info_sub_.shutdown();
@@ -168,6 +181,7 @@ public:
                                                                            boost::bind(homography_callback, _1,
                                                                                        std::ref(cam2world_), std::ref(world2cam_),
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
+                                                                                       std::ref(scaledCam2world_), std::ref(scaledWorld2cam_),
                                                                                        std::ref(homography_received_)));
   }
 
@@ -220,6 +234,7 @@ public:
                                                                            boost::bind(homography_callback, _1,
                                                                                        std::ref(cam2world_), std::ref(world2cam_),
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
+                                                                                       std::ref(scaledCam2world_), std::ref(scaledWorld2cam_),
                                                                                        std::ref(homography_received_)));
   }
 
@@ -259,39 +274,75 @@ public:
     camera_frame_ = frame;
   }
 
-  bool worldToImage(const cv::Point3f& world_point,
-                    cv::Point& image_point) {
-
-    if(!homography_received_ || !camera_model_received_) {
-      if (!homography_received_)
-        ROS_WARN_STREAM("[WorldToImage] Homography not received yet, skipping world to image transformation requested for world point "<<world_point<<" and returning image Point2i (0,0)");
-      if (!camera_model_received_)
-        ROS_WARN_STREAM("[WorldToImage] Camera model not received yet, skipping world to image transformation requested for world point "<<world_point<<" and returning image Point2i (0,0)");
-      image_point = cv::Point(0,0);
+  ///
+  /// \brief imageToWorld
+  /// Converts all imagePoints to the corresponding worldPoints using the cam2world matrix.
+  /// \param imagePoints
+  /// \param worldPoints
+  /// \return true on success, false on failure.
+  ///
+  bool imageToWorld(std::vector<cv::Point2f> &imagePoints, std::vector<cv::Point2f> &worldPoints) {
+    if(!homography_received_) {
+      ROS_WARN_STREAM("[imagetoWorld] Homography not received yet");
       return false;
     }
-
-    // transform to image point and then repeat homography transform
-    cv::Point2d pixel_coords = cam_model_.project3dToPixel(world_point);
-    cv::Mat mat_pixel_coords(1,1,CV_64FC2,cv::Scalar(0.0));
-    mat_pixel_coords.at<double>(0,0) = pixel_coords.x;
-    mat_pixel_coords.at<double>(0,1) = pixel_coords.y;
-    cv::Mat mat_image_point(1,1,CV_64FC2,cv::Scalar(0.0));
-    if (use_homography_) {
-      cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_inv_);
-      image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
-    }
-    else {
-      // nothing to transform if homography has not been applied
-      image_point = cv::Point(pixel_coords.x, pixel_coords.y);
-    }
+    cv::perspectiveTransform(imagePoints, worldPoints, cam2world_);
     return true;
   }
 
-  bool worldToImage(const cv::Point2f &world_point, cv::Point &image_point) {
-    return worldToImage(cv::Point3f(world_point.x, world_point.y, 0.0f), image_point);
+  ///
+  /// \brief worldToImage
+  /// Converts all worldPoints to the corresponding imagePoints using the world2cam matrix.
+  /// \param worldPoints
+  /// \param imagePoints
+  /// \return true on success, false on failure.
+  ///
+  bool worldToImage(std::vector<cv::Point2f> &worldPoints, std::vector<cv::Point2f> &imagePoints) {
+    if(!homography_received_) {
+      ROS_WARN_STREAM("[worldToImage] Homography not received yet");
+      return false;
+    }
+    cv::perspectiveTransform(worldPoints, imagePoints, world2cam_);
+    return true;
   }
 
+  ///
+  /// \brief homographImage
+  /// Warps the srcImg to get the "bird eye view" image.
+  /// \param srcImg
+  /// \param dstImg
+  /// \return true on success, false on failure.
+  ///
+  bool homographImage(cv::Mat &srcImg, cv::Mat &dstImg) {
+    if(!homography_received_) {
+       ROS_WARN_STREAM("[homographImage] Homography not received yet");
+      return false;
+    }
+    dstImg = cv::Mat::zeros( srcImg.rows, srcImg.cols, srcImg.type() );
+    cv::warpPerspective(srcImg, dstImg, scaledCam2world_, transformed_size_);
+    return true;
+  }
+
+  ///
+  /// \brief cameraToWarpedImg
+  /// Converts a camera points to the corresponding points in the warped image.
+  /// \param cameraPoints
+  /// \param worldPoint
+  /// \return true on success, false on failure.
+  ///
+  bool cameraToWarpedImg(std::vector<cv::Point2f> &cameraPoints, std::vector<cv::Point2f> &warpedImgPoints) {
+    if(!homography_received_) {
+      ROS_WARN_STREAM("[cameraToWarpedImg] Homography not received yet");
+      return false;
+    }
+    cv::perspectiveTransform(cameraPoints, warpedImgPoints, scaledCam2world_);
+    return true;
+  }
+
+  /*
+   * Simon says: these two methods are not working properly, since we are doing the homography twice (first use the homog matrix
+   * and then the TF conversion. I will leave this in, in case we need the tf version later.
+   */
   bool imageToWorld(const cv::Point& image_point, cv::Point2f& world_point, std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
     if(!homography_received_ || !camera_model_received_) {
       if (!homography_received_)
@@ -306,9 +357,14 @@ public:
     obj_corners[0] = cv::Point2f(image_point.x, image_point.y);
     std::vector<cv::Point2f> scene_corners(1);
     if (homography_received_)
-      cv::perspectiveTransform(obj_corners, scene_corners, scaling_mat_);
+//      cv::perspectiveTransform(obj_corners, scene_corners, scaling_mat_inv_);
+      cv::perspectiveTransform(obj_corners, scene_corners, cam2world_);
     else
-      scene_corners[0] = obj_corners[0]; // no homography transforms if we use camera image directly
+      scene_corners[0] = obj_corners[0]; // no homography transform if we use camera image directly
+
+    world_point = scene_corners.at(0);
+    return true;
+
     // this returns a point with z=1, the pixel is on a ray from origin to this point
     cv::Point3d cam_ray_point = cam_model_.projectPixelTo3dRay(scene_corners[0]);
 
@@ -352,6 +408,43 @@ public:
     }
   }
 
+  bool worldToImage(const cv::Point2f& world_point, cv::Point2f& image_point) {
+    if (!homography_received_) {
+      ROS_WARN_STREAM("[WorldToImage] Homography not received yet, skipping world to image transformation requested for world point "<<world_point<<" and returning image Point2i (0,0)");
+      image_point = cv::Point(0,0);
+      return false;
+    }
+
+    if (!camera_model_received_) {
+      ROS_WARN_STREAM("[WorldToImage] Camera model not received yet, skipping world to image transformation requested for world point "<<world_point<<" and returning image Point2i (0,0)");
+      image_point = cv::Point(0,0);
+      return false;
+    }
+
+    std::vector<cv::Point2f> worldPoints(1);
+    std::vector<cv::Point2f> imagePoints(1);
+    worldPoints[0] = cv::Point2f(image_point.x, image_point.y);
+    cv::perspectiveTransform(worldPoints, imagePoints, world2cam_);
+    image_point = imagePoints.at(0);
+
+    // transform to image point and then repeat homography transform
+    cv::Point2d pixel_coords = cam_model_.project3dToPixel(cv::Point3f(world_point.x, world_point.y, 0.0));
+    cv::Mat mat_pixel_coords(1,1,CV_64FC2,cv::Scalar(0.0));
+    mat_pixel_coords.at<double>(0,0) = pixel_coords.x;
+    mat_pixel_coords.at<double>(0,1) = pixel_coords.y;
+    cv::Mat mat_image_point(1,1,CV_64FC2,cv::Scalar(0.0));
+    if (use_homography_) {
+      cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_);
+      image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
+    }
+    else {
+      // nothing to transform if homography has not been applied
+      image_point = cv::Point(pixel_coords.x, pixel_coords.y);
+    }
+
+    return true;
+  }
+
   void setcam2worldMat(const cv::Mat& cam2world) {
     cam2world_ = cam2world;
   }
@@ -372,6 +465,8 @@ private:
   cv::Mat world2cam_;
   cv::Mat scaling_mat_;
   cv::Mat scaling_mat_inv_;
+  cv::Mat scaledWorld2cam_;
+  cv::Mat scaledCam2world_;
   cv::Size transformed_size_;
   tf::TransformListener tf_listener_;
   ros::Subscriber cam_info_sub_;

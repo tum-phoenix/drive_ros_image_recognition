@@ -1,7 +1,7 @@
 <launch>
     <arg name="incoming_image" default="/camera/image_raw"/>
     <arg name="camera_info" default="/camera/camera_info"/>
-    <arg name="homography_topic" default="/camera/camera_homography"/>
+    <arg name="homography_topic" default="/camera/camera_homog"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
@@ -13,7 +13,7 @@
         <node name="street_crossing" pkg="drive_ros_image_recognition" type="street_crossing_node" respawn="false" output="screen" launch-prefix="$(arg launch-prefix)">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
-            <remap from="homography_topic" to="$(arg homography_topic)"/>
+            <remap from="homography_in" to="$(arg homography_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
