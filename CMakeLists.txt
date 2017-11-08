@@ -50,66 +50,6 @@ include_directories(
     ${Boost_INCLUDE_DIRS}
     )
 
-<<<<<<< HEAD
-=======
-
-################################################################################
-# road detection node (LMS port)
-################################################################################
-
-add_executable(road_detection_node
-    src/road_detection.cpp
-    src/road_detection_node.cpp
-    )
-
-add_dependencies(road_detection_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-target_link_libraries(road_detection_node
-    ${catkin_LIBRARIES}
-    ${OpenCV_LIBS}
-    ${Boost_LIBRARIES}
-    )
-
-install(TARGETS road_detection_node
-    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-    )
-
-if(CATKIN_ENABLE_TESTING)
-    find_package(rostest REQUIRED)
-    add_rostest_gtest(road_detection_node_test launch/road_detection.test
-        test/common_image_operations_test.cpp
-        test/road_detection_test.cpp
-        test/geometry_common_test.cpp
-        )
-    target_link_libraries(road_detection_node_test ${catkin_LIBRARIES})
-endif()
-
-
-################################################################################
-# road detection nodelet (LMS port)
-################################################################################
-
-add_library(road_detection_nodelet
-    src/road_detection.cpp
-    )
-
-add_dependencies(road_detection_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-target_link_libraries(road_detection_nodelet
-    ${catkin_LIBRARIES}
-    ${OpenCV_LIBS}
-    ${Boost_LIBRARIES}
-    )
-
-install(TARGETS road_detection_nodelet
-    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-    )
-
->>>>>>> 28a7bf5183753e1b6f8cbad083fa477061a344da
 ################################################################################
 # Warp image node
 ################################################################################
@@ -152,11 +92,7 @@ install(TARGETS warp_image_nodelet
     )
 
 ################################################################################
-<<<<<<< HEAD
 # Line detection node
-=======
-# Street crossing detection nodelet (LMS port)
->>>>>>> 28a7bf5183753e1b6f8cbad083fa477061a344da
 ################################################################################
 
 add_executable(line_detection_node
