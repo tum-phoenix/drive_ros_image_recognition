@@ -96,7 +96,7 @@ void LineDetection::findLane() {
 
   // Get houghlines
   std::vector<cv::Vec4i> hLinePoints;
-  std::vector<StreetLine> filteredLines;
+  std::vector<Line> filteredLines;
 
   cv::HoughLinesP(processingImg, hLinePoints, 1, CV_PI / 180, houghThresold_, houghMinLineLen_, houghMaxLineGap_);
 
@@ -115,7 +115,7 @@ void LineDetection::findLane() {
 
   // Filter the lines
   for(size_t i = 0; i < worldPoints.size(); i += 2) {
-    StreetLine sl(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1));
+    Line sl(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1));
     filteredLines.push_back(sl);
 #ifdef DRAW_DEBUG
     cv::line(allLinesImg, sl.iP1_, sl.iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
@@ -132,7 +132,7 @@ void LineDetection::findLane() {
     worldPoints.push_back(cv::Point2f(0.70, 0.5));
     if(image_operator_.worldToImage(worldPoints, imagePoints)) {
       for(size_t i = 0; i < imagePoints.size() - 1; i++)
-        currentLane_.push_back(StreetLine(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
+        currentLane_.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
     } else {
       // no guess, means no detection
       return;
@@ -147,9 +147,9 @@ void LineDetection::findLane() {
 #endif
 
   // Use the guess to classify the lines
-  std::vector<StreetLine> leftLine, middleLine, rightLine;
-  for(StreetLine sl : filteredLines) {
-    StreetLine segment = currentLane_.at(0);
+  std::vector<Line> leftLine, middleLine, rightLine;
+  for(Line sl : filteredLines) {
+    Line segment = currentLane_.at(0);
       bool isInSegment = false;
       // find the coresponding segment
       // todo: this only uses the x-coordinate right now, improve this
@@ -197,7 +197,7 @@ void LineDetection::findLane() {
 ////    currentLane_.push_back(l);
 
 //  // sort the middle lines based on the front distance of the vehicle
-////  std::sort(middleLine.begin(), middleLine.end(), [](const StreetLine& a, const StreetLine& b){ return a.wMid_.x < b.wMid_.x; });
+////  std::sort(middleLine.begin(), middleLine.end(), [](const Line& a, const Line& b){ return a.wMid_.x < b.wMid_.x; });
 //  std::vector<cv::Point2f> guessImgPoints, guessWorldPoints;
 //  for(auto lineIt = middleLine.begin(); lineIt != middleLine.end(); ++lineIt) {
 //    guessWorldPoints.push_back(lineIt->wP1_);
@@ -211,7 +211,7 @@ void LineDetection::findLane() {
 
 //  if((guessWorldPoints.size() > 0) && (image_operator_.worldToImage(guessWorldPoints, guessImgPoints))) {
 //    for(size_t i = 1; i < guessImgPoints.size(); i++) {
-//      currentLane_.push_back(StreetLine(guessImgPoints.at(i - 1), guessImgPoints.at(i), guessWorldPoints.at(i - 1), guessWorldPoints.at(i)));
+//      currentLane_.push_back(Line(guessImgPoints.at(i - 1), guessImgPoints.at(i), guessWorldPoints.at(i - 1), guessWorldPoints.at(i)));
 //    }
 
 //  }

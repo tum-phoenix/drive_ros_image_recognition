@@ -92,32 +92,10 @@ inline void camInfo_callback(const sensor_msgs::CameraInfoConstPtr& incoming_cam
   cam_info_received = true;
 }
 
-enum search_direction {
-  x = false,
-  y = true
-};
-
-enum search_method {
-  sobel = false,
-  brightness = true
-};
-
-struct SearchLine{
-  cv::Point2f wStart;
-  cv::Point2f wEnd;
-  cv::Point2i iStart;
-  cv::Point2i iEnd;
-
-  cv::Point2f wLeft;
-  cv::Point2f wMid;
-  cv::Point2f wRight;
-};
-
 class TransformHelper {
 
 public:
-
-  TransformHelper(bool use_homography = true):
+  TransformHelper():
     tf_listener_(),
     world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
     cam_model_(),
@@ -131,8 +109,7 @@ public:
     camera_model_received_(false),
     // temporary solution until have embedded correct frame in camerainfo messages (including the bag files)
     camera_frame_(""),
-    world_frame_(""),
-    use_homography_(use_homography)
+    world_frame_("")
   {
   }
 
@@ -197,8 +174,7 @@ public:
     camera_model_received_(false),
     // temporary solution until have embedded correct frame in camerainfo messages (including the bag files)
     camera_frame_(""),
-    world_frame_(""),
-    use_homography_(true)
+    world_frame_("")
   {
   }
 
@@ -236,10 +212,7 @@ public:
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
                                                                                        std::ref(scaledCam2world_), std::ref(scaledWorld2cam_),
                                                                                        std::ref(homography_received_)));
-  }
-
-  void setCamModel(const image_geometry::PinholeCameraModel& cam_model) {
-    cam_model_ = cam_model;
+    return true;
   }
 
   void setWorldFrame(const std::string& frame) {
@@ -277,6 +250,8 @@ public:
   ///
   /// \brief imageToWorld
   /// Converts all imagePoints to the corresponding worldPoints using the cam2world matrix.
+  /// Important: x and y switches when converted. The origin is on the camera mount point on the ground.
+  /// The y-cooridnate goes to the front of the car, the x-coordinate to the left.
   /// \param imagePoints
   /// \param worldPoints
   /// \return true on success, false on failure.
@@ -293,6 +268,8 @@ public:
   ///
   /// \brief worldToImage
   /// Converts all worldPoints to the corresponding imagePoints using the world2cam matrix.
+  /// Important: x and y switches when converted. The origin is on the camera mount point on the ground.
+  /// The y-cooridnate goes to the front of the car, the x-coordinate to the left.
   /// \param worldPoints
   /// \param imagePoints
   /// \return true on success, false on failure.
@@ -428,29 +405,15 @@ public:
     mat_pixel_coords.at<double>(0,0) = pixel_coords.x;
     mat_pixel_coords.at<double>(0,1) = pixel_coords.y;
     cv::Mat mat_image_point(1,1,CV_64FC2,cv::Scalar(0.0));
-    if (use_homography_) {
-      cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_);
-      image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
-    }
-    else {
-      // nothing to transform if homography has not been applied
-      image_point = cv::Point(pixel_coords.x, pixel_coords.y);
-    }
+    cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_);
+    image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
+
 
     return true;
   }
 
-  void setcam2worldMat(const cv::Mat& cam2world) {
-    cam2world_ = cam2world;
-  }
-
-  void setworld2camMat(const cv::Mat& world2cam) {
-    world2cam_ = world2cam;
-  }
-
 private:
   image_geometry::PinholeCameraModel cam_model_;
-  bool use_homography_;
   bool homography_received_;
   bool camera_model_received_;
   std::string world_frame_;
@@ -476,8 +439,6 @@ public:
     TransformHelper(),
     config_()
   {
-    config_.sobelThreshold = 50;
-    config_.brightness_threshold = 150;
   }
 
   ImageOperator(ImageOperator& image_operator):
@@ -496,202 +457,6 @@ public:
     TransformHelper(helper),
     config_()
   {
-    config_.sobelThreshold = 50;
-    config_.brightness_threshold = 150;
-  }
-
-  std::vector<cv::Point2f> returnValidPoints(const SearchLine &sl,
-                                             const cv::Mat& current_image,
-                                             const float lineWidth,
-                                             const search_direction search_dir,
-                                             const search_method method)
-  {
-    std::vector<cv::Point> imagePoints;
-    std::vector<int> lineWidths;
-    std::vector<cv::Point2f> foundPoints;
-
-    float iDist = cv::norm(sl.iEnd - sl.iStart);
-    float wDist = cv::norm(sl.wEnd - sl.wStart);
-    float pxlPeakWidth = iDist/wDist*lineWidth;
-    findByLineSearch(sl, current_image, search_dir, method, imagePoints, lineWidths);
-
-    cv::Point2f wMid;
-
-    for (int i=0; i<imagePoints.size(); ++i) {
-      if (lineWidths[i] > pxlPeakWidth*config_.minLineWidthMul && lineWidths[i] < pxlPeakWidth*config_.maxLineWidthMul) {
-        imageToWorld(imagePoints[i], wMid);
-        foundPoints.push_back(wMid);
-      }
-    }
-    return foundPoints;
-  }
-
-  void findByLineSearch(const SearchLine& sl,
-                        const cv::Mat& current_image,
-                        const search_direction search_dir,
-                        const search_method search_meth,
-                        std::vector<cv::Point>& image_points,
-                        std::vector<int>& line_widths
-                        )
-  {
-    cv::Mat processed_image;
-    // step 0: cut image to line
-    processed_image = current_image(cv::Rect(sl.iStart,
-                                             cv::Point(sl.iEnd.x+(search_dir==search_direction::y),
-                                                       sl.iEnd.y+(search_dir==search_direction::x))
-                                             ));
-
-    // step 1: threshold image with mat:
-    if (search_meth == search_method::brightness) {
-      cv::threshold(processed_image, processed_image, config_.brightness_threshold, 255, CV_THRESH_BINARY);
-      // testing removal of bright white blobs
-//      std::vector<std::vector<cv::Point> > image_contours;
-//      cv::findContours(processed_image, image_contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
-//      processed_image = cv::Mat::zeros(current_image.rows, current_image.cols, CV_8UC1);
-//      cv::Mat debug_exclude_image = cv::Mat::zeros(current_image.rows, current_image.cols, CV_8UC1);
-//      for (int cnt = 0; cnt < image_contours.size(); ++cnt) {
-//        if (cv::contourArea(image_contours[cnt]) < config_.blob_area_threshold)
-//          cv::drawContours(processed_image, image_contours, cnt, cv::Scalar(255), CV_FILLED);
-//        else if (cv::contourArea(image_contours[cnt])/cv::boundingRect(image_contours[cnt]).area()<config_.blob_aspect_threshold)
-//          cv::drawContours(processed_image, image_contours, cnt, cv::Scalar(255), CV_FILLED);
-//        else {
-//          ROS_INFO_STREAM("Contour area of checked: "<<cv::contourArea(image_contours[cnt])<<" threshold is: "<<config_.blob_area_threshold);
-//          ROS_INFO_STREAM("Aspect ratio of checked: "<<cv::contourArea(image_contours[cnt])/cv::boundingRect(image_contours[cnt]).area()<<" threshold is: "<<config_.blob_aspect_threshold);
-//          cv::drawContours(debug_exclude_image, image_contours, cnt, cv::Scalar(255), CV_FILLED);
-//        }
-//        ROS_INFO_STREAM("Aspect ratio of checked: "<<cv::contourArea(image_contours[cnt])/cv::boundingRect(image_contours[cnt]).area()<<" threshold is: "<<config_.blob_aspect_threshold);
-//      }
-//      cv::namedWindow("Excluded contours", CV_WINDOW_NORMAL);
-//      cv::imshow("Excluded contours", debug_exclude_image);
-    } else if (search_meth == search_method::sobel) {
-      processed_image.convertTo(processed_image, CV_16S);
-      if (search_dir == search_direction::x) {
-        cv::Sobel(processed_image, processed_image, CV_16S, 1, 0, 1, 1, 0, cv::BORDER_DEFAULT);
-      }
-      else if(search_dir == search_direction::y) {
-        cv::Sobel(processed_image, processed_image, CV_16S, 0, 1, 1, 1, 0, cv::BORDER_DEFAULT);
-      }
-    }
-
-#ifdef DRAW_DEBUG
-    // display initial image
-    cv::Mat debug_image = processed_image.clone();
-    if (search_meth == search_method::brightness) {
-      cv::namedWindow("Thresholded image in brightness search", CV_WINDOW_NORMAL);
-      cv::imshow("Thresholded image in brightness search", debug_image);
-    } else if (search_meth == search_method::sobel) {
-      cv::namedWindow("Sobel image in line search", CV_WINDOW_NORMAL);
-      cv::imshow("Sobel image in line search", debug_image);
-    }
-#endif
-
-    if (search_meth == search_method::brightness) {
-      // step3: get connected components (can be multiple) and calculate midpoints
-      std::vector<std::vector<cv::Point> > line_contours;
-      cv::findContours(processed_image, line_contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
-
-#ifdef DRAW_DEBUG
-      // line contours
-      cv::namedWindow("Line contours", CV_WINDOW_NORMAL);
-      cv::Mat line_contour_image = processed_image.clone();
-      for (int i=0; i<line_contours.size(); ++i)
-        cv::drawContours(line_contour_image, line_contours, i, cv::Scalar(255));
-      cv::imshow("Line contours", line_contour_image);
-#endif
-
-      // step5: get midpoints of components
-      cv::Rect bounds;
-      cv::Point temp_point;
-      for (auto contour: line_contours) {
-        bounds = cv::boundingRect( cv::Mat(contour) );
-        // todo: add parameter if we will use contours
-        if (bounds.area() > 6 && bounds.area() < 20) {
-          line_widths.push_back(bounds.br().x-bounds.tl().x);
-          temp_point = (bounds.tl()+bounds.br())/2;
-          if (search_dir == search_direction::x) {
-            temp_point.y = sl.iEnd.y;
-          } else {
-            temp_point.x = sl.iEnd.x;
-          }
-          image_points.push_back(temp_point);
-        }
-      }
-    } else if (search_meth == search_method::sobel) {
-      bool lowhigh_found = false;
-      int first = 0;
-      for(int i=0; i<processed_image.rows*processed_image.cols; ++i)
-      {
-        if (processed_image.at<short>(i) > config_.sobelThreshold) {
-          lowhigh_found = true;
-          first = i;
-        } else if (lowhigh_found && processed_image.at<short>(i) < -config_.sobelThreshold) {
-          line_widths.push_back(i-first);
-          if (search_dir == search_direction::x) {
-            image_points.push_back(cv::Point(sl.iStart.x+first+(i-first)/2,sl.iStart.y));
-          }
-          else if (search_dir == search_direction::y) {
-            image_points.push_back(cv::Point(sl.iStart.x,sl.iStart.y+first+(i-first)/2));
-          }
-          lowhigh_found = false;
-        }
-      }
-    }
-
-    return;
-  }
-
-  // debug to perform line check
-  void debugPointsImage (const cv::Mat& current_image,
-                         const search_direction search_dir,
-                         const search_method search_meth
-                         ) {
-    std::vector<cv::Point> image_points;
-    std::vector<int> image_widths;
-#ifdef DRAW_DEBUG
-    cv::Mat debug_image;
-    cv::cvtColor(current_image, debug_image, CV_GRAY2RGB);
-#endif
-
-    int search_steps = 6;
-    int pixel_step = 50;
-    SearchLine lines[search_steps];
-    for (int it = 3; it < search_steps; ++it) {
-      if (search_dir == search_direction::x) {
-        lines[it].iStart = cv::Point(0,it*pixel_step);
-        lines[it].iEnd = cv::Point(current_image.cols, it*pixel_step);
-      } else if (search_dir == search_direction::y) {
-        lines[it].iStart = cv::Point(it*pixel_step, 0);
-        lines[it].iEnd = cv::Point(it*pixel_step, current_image.rows);
-      }
-#ifdef DRAW_DEBUG
-      cv::line(debug_image, lines[it].iStart, lines[it].iEnd, cv::Scalar(255,255,255));
-#endif
-      findByLineSearch(lines[it],
-                       current_image,
-                       search_dir,
-                       search_meth,
-                       image_points,
-                       image_widths
-                       );
-#ifdef DRAW_DEBUG
-      for (auto point: image_points) {
-        cv::circle(debug_image,point,2,cv::Scalar(0,255,0),2);
-      }
-#endif
-    }
-#ifdef DRAW_DEBUG
-    if (search_meth == search_method::sobel) {
-      cv::namedWindow("Debug lineCheck sobel", CV_WINDOW_NORMAL);
-      cv::imshow("Debug lineCheck sobel", debug_image);
-      cv::waitKey(1);
-    }
-    if (search_meth == search_method::brightness) {
-      cv::namedWindow("Debug lineCheck brightness", CV_WINDOW_NORMAL);
-      cv::imshow("Debug lineCheck brightness", debug_image);
-      cv::waitKey(1);
-    }
-#endif
-    return;
   }
 
   void setConfig(const LineDetectionConfig& config) {

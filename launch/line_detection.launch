@@ -14,7 +14,6 @@
             <remap from="~/img_in" to="$(arg incoming_image)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
-            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>

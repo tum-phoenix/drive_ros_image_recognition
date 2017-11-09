@@ -1,5 +1,5 @@
-#ifndef STREET_LINE_H
-#define STREET_LINE_H
+#ifndef LINE_H
+#define LINE_H
 
 ///
 /// \brief The StreetLine class
@@ -7,13 +7,14 @@
 /// The class saves the two points in image coordinates and world coordinates.
 /// The world coordinates are in meters, e.g. 0.5 is 50 cm.
 /// You are responsible that wP1_ is the correct world points for iP1_, same for wP2_ and iP2_.
+/// Important: The x and y coordinates switch when converted from image to world or back.
 ///
-class StreetLine {
+class Line {
 public:
   cv::Point iP1_, iP2_, iMid_;
   cv::Point2f wP1_, wP2_, wMid_;
 
-  StreetLine(cv::Point iP1, cv::Point iP2, cv::Point2f wP1, cv::Point2f wP2)
+  Line(cv::Point iP1, cv::Point iP2, cv::Point2f wP1, cv::Point2f wP2)
     : iP1_(iP1)
     , iP2_(iP2)
     , wP1_(wP1)
@@ -27,4 +28,4 @@ public:
   inline double getAngle() { return abs(atan2(iP1_.y - iP2_.y, iP1_.x - iP2_.x)); }
 };
 
-#endif // STREET_LINE_H
+#endif // LINE_H

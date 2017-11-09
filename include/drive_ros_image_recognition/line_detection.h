@@ -12,7 +12,7 @@
 #include <drive_ros_image_recognition/LineDetectionConfig.h>
 #include <nodelet/nodelet.h>
 #include "drive_ros_msgs/RoadLane.h"
-#include "street_line.h"
+#include "line.h"
 
 namespace drive_ros_image_recognition {
 
@@ -31,7 +31,7 @@ private:
 
   // variables
   CvImagePtr currentImage_;
-  std::vector<StreetLine> currentLane_;
+  std::vector<Line> currentLane_;
   ImageOperator image_operator_;
 
   // communication

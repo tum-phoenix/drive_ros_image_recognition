@@ -1,8 +1,9 @@
 <launch>
     <arg name="camera_image_topic" default="/camera/image_raw"/>
+    <arg name="camera_info_topic" default="/camera/camera_info"/>
     <arg name="warped_image_topic" default="/warped_image"/>
     <arg name="undistort_out" default="/undistorted_image"/>
-    <arg name="homography_topic" default="/camera/camera_homography"/>
+    <arg name="homography_topic" default="/camera/camera_homog"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
@@ -17,6 +18,7 @@
             <remap from="homography_in" to="$(arg homography_topic)"/>
              <!-- debug: undistored camera image (not warped) -->
             <remap from="undistort_out" to="$(arg undistort_out)"/>
+            <remap from="camera_info" to="$(arg camera_info_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>
