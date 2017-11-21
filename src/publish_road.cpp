@@ -27,13 +27,13 @@ int main(int argc, char** argv)
     geometry_msgs::PointStamped point;
     point.header.stamp = ros::Time::now();
     point.header.frame_id = "front_axis_middle";
-    point.point.x = 0.0;
+    point.point.x = 0.1;
     point.point.y = 0.0;
     point.point.z = 0.0;
     my_road.points[0] = point;
     point_stamped_pub.publish(point);
-    point.point.x = 0.1;
-    point.point.y = 0.1;
+    point.point.x = 0.2;
+    point.point.y = 0.0;
     point.point.z = 0.0;
     my_road.points[1] = point;
     point_pub.publish(my_road);

@@ -280,67 +280,68 @@ bool RoadDetection::find(){
   geometry_msgs::PointStamped moved_point_camera;
   // assuming all points in message are in the same frame (they should)
   moved_point.header.frame_id = road_points_buffer_.front().header.frame_id;
-  linestring mid_temp, left_temp, right_temp;
-  auto it_mid = mid.begin();
-  auto it_left = left.begin();
-  auto it_right = right.begin();
+  std::vector<cv::Point3d> mid_temp, left_temp, right_temp;
+  auto it_mid_bg = mid.begin();
+  auto it_left_bg = left.begin();
+  auto it_right_bg = right.begin();
   auto it_original = road_points_buffer_.begin();
-  for(int it = 0; it<mid.size(); ++it, ++it_mid, ++it_original, ++it_right, ++it_left){
-    moved_point.point.x = it_mid->x();
-    moved_point.point.y = it_mid->y();
+  for(int it = 0; it<mid.size(); ++it, ++it_mid_bg, ++it_original, ++it_right_bg, ++it_left_bg){
+    moved_point.point.x = it_mid_bg->x();
+    moved_point.point.y = it_mid_bg->y();
     moved_point.point.z = it_original->point.z;
     image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
-    boost::geometry::append(mid_temp,point_xy(moved_point_camera.point.x, moved_point_camera.point.y));
-    moved_point.point.x = it_left->x();
-    moved_point.point.y = it_left->y();
+    mid_temp.push_back(cv::Point3d(moved_point_camera.point.x, moved_point_camera.point.y, moved_point_camera.point.z));
+    moved_point.point.x = it_left_bg->x();
+    moved_point.point.y = it_left_bg->y();
     moved_point.point.z = it_original->point.z;
     image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
-    boost::geometry::append(left_temp,point_xy(moved_point_camera.point.x, moved_point_camera.point.y));
-    moved_point.point.x = it_right->x();
-    moved_point.point.y = it_right->y();
+    left_temp.push_back(cv::Point3d(moved_point_camera.point.x, moved_point_camera.point.y, moved_point_camera.point.z));
+    moved_point.point.x = it_right_bg->x();
+    moved_point.point.y = it_right_bg->y();
     moved_point.point.z = it_original->point.z;
     image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
-    boost::geometry::append(right_temp,point_xy(moved_point_camera.point.x, moved_point_camera.point.y));
+    right_temp.push_back(cv::Point3d(moved_point_camera.point.x, moved_point_camera.point.y, moved_point_camera.point.z));
   }
 
-  mid = mid_temp;
-  right = right_temp;
-  left = left_temp;
-
   //get all lines
-  it_mid = mid.begin();
-  it_left = left.begin();
-  it_right = right.begin();
+  // todo: assert equal length of right, middle and left points (in world frame plane and image)
   bool moved_to_mid = false;
-  for(int it = 0; it<mid.size(); it++, ++it_mid, ++it_right, ++it_left){
+  for(int it = 0; it<mid.size(); it++){
     SearchLine l;
     moved_to_mid = false;
-    // todo: probably wrong, check which exactly to get, will need end and start on the first probably
-    l.wLeft = cv::Point2f(it_left->x(),it_left->y());
-    l.wMid = cv::Point2f(it_mid->x(),it_mid->y());
-    l.wRight = cv::Point2f(it_right->x(),it_right->y());
-
-    if (!image_operator_.worldToImage(l.wLeft, l.iStart)) {
-      ROS_WARN_STREAM("Unable to transform left line start point "<<l.wStart<<" to image coordinates, trying middle point");
+    // those points are in the world frame plane
+    l.wStart = cv::Point2f(left[it].x(), left[it].y());
+    l.wEnd = cv::Point2f(right[it].x(), right[it].y());
+    l.wLeft = cv::Point2f(left[it].x(), left[it].y());
+    l.wRight = cv::Point2f(right[it].x(), right[it].y());
+    l.wMid = cv::Point2f(mid[it].x(), mid[it].y());
+    // for transformation we use points in the optical camera tf frame
+    if (!image_operator_.worldToImage(left_temp[it], l.iStart)) {
+      ROS_WARN_STREAM("Unable to transform left line start point "<<left_temp[it]<<" to image coordinates, trying middle point");
       // try middle lane -> should always be in image
-      l.wLeft = l.wMid;
       moved_to_mid = true;
-      if (!image_operator_.worldToImage(l.wLeft, l.iStart)) {
-        ROS_WARN_STREAM("Unable to transform middle line point "<<l.wStart<<" to image");
+      // once again-> image plane
+      l.wStart = cv::Point2f(mid[it].x(), mid[it].y());
+      // once again: camera_optical tf frame
+      if (!image_operator_.worldToImage(mid_temp[it], l.iStart)) {
+        ROS_WARN_STREAM("Unable to transform middle line point "<<mid_temp[it]<<" to image");
         continue;
       }
     }
-    if (!image_operator_.worldToImage(l.wRight, l.iEnd)) {
-      ROS_WARN_STREAM("Unable to transform left line end point "<<l.wEnd<<" to image coordinates, trying middle point");
+    // camera_optical tf frame
+    if (!image_operator_.worldToImage(right_temp[it], l.iEnd)) {
+      ROS_WARN_STREAM("Unable to transform left line end point "<<right_temp[it]<<" to image coordinates, trying middle point");
       // if the right side is out of the current view, use middle instead
       // do not use it if the left point already was moved to the middle as well
       if (moved_to_mid) {
         ROS_WARN_STREAM("Left point has already been moved to middle, skipping line");
         continue;
       } else {
-        l.wRight = l.wMid;
-        if(!image_operator_.worldToImage(l.wEnd, l.iEnd)) {
-          ROS_WARN_STREAM("Unable to transform middle line point "<<l.wEnd<<" to image");
+        // world plane
+        l.wEnd = cv::Point2f(mid[it].x(), mid[it].y());
+        // camera_optical tf frame
+        if(!image_operator_.worldToImage(mid_temp[it], l.iEnd)) {
+          ROS_WARN_STREAM("Unable to transform middle line point "<<mid_temp[it]<<" to image");
           continue;
         }
       }
@@ -373,35 +374,52 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
 
   std::vector<cv::Point2f> foundPoints;
 
+  // draw search line points in image
+#ifdef DRAW_DEBUG
+  cv::namedWindow("Line search points", CV_WINDOW_NORMAL);
+  cv::Mat debug_image_line;
+  cv::cvtColor(current_image_->clone(), debug_image_line, cv::COLOR_GRAY2RGB);
+  cv::circle(debug_image_line, l.iStart, 3, cv::Scalar(255,0,0));
+  cv::circle(debug_image_line, l.iEnd, 3, cv::Scalar(0,0,255));
+  cv::line(debug_image_line, l.iStart, l.iEnd, cv::Scalar(0,255,0));
+  cv::imshow("Line search points", debug_image_line);
+#endif
+
   //find points
   if(findPointsBySobel_){
     // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
-    foundPoints = image_operator_.returnValidPoints(l, *current_image_, 0.02, search_direction::x, search_method::sobel);
+    foundPoints = image_operator_.returnValidPoints(l, *current_image_, 0.02, search_direction::y, search_method::sobel);
   }else{
     // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
-    foundPoints = image_operator_.returnValidPoints(l, *current_image_, 0.02, search_direction::x, search_method::brightness);
+    // todo: generate kernel based on line angle instead of choosing sobel direction here
+    foundPoints = image_operator_.returnValidPoints(l, *current_image_, 0.02, search_direction::y, search_method::brightness);
   }
 
-  // draw unfiltered image points
-#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-    cv::namedWindow("Unfiltered points", CV_WINDOW_NORMAL);
-    cv::Mat found_points_mat = current_image_->clone();
-    for (auto point : foundPoints) {
-      cv::circle(found_points_mat, point, 2, cv::Scalar(255));
-    }
-    // draw search line
-    cv::line(found_points_mat, l.iStart, l.iEnd, cv::Scalar(255));
-#ifdef DRAW_DEBUG
-    cv::imshow("Unfiltered points", found_points_mat);
-    cv::waitKey(1);
-#endif
+  if (foundPoints.size() != 0)
+    ROS_INFO_STREAM("Found "<<foundPoints.size()<<" points in image!");
 
-#ifdef PUBLISH_DEBUG
-    detected_points_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, found_points_mat).toImageMsg());
-#endif
-#endif
+  // draw unfiltered image points
+//#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
+//    cv::namedWindow("Unfiltered points", CV_WINDOW_NORMAL);
+//    cv::Mat found_points_mat = current_image_->clone();
+//    for (auto point : foundPoints) {
+//      cv::circle(found_points_mat, point, 2, cv::Scalar(255));
+//    }
+//    // draw search line
+//    cv::line(found_points_mat, l.iStart, l.iEnd, cv::Scalar(255));
+//#ifdef DRAW_DEBUG
+//    cv::imshow("Unfiltered points", found_points_mat);
+//    cv::waitKey(1);
+//#endif
+
+//#ifdef PUBLISH_DEBUG
+//    detected_points_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, found_points_mat).toImageMsg());
+//#endif
+//#endif
+  cv::waitKey(1);
 
   //filter
+  // basically checks that points belong to the lanes themselves from the looks
   //TODO filter points that are in poluted regions (for example the car itself)
   //remove points with bad distances
   std::vector<cv::Point2f> validPoints;
@@ -415,7 +433,7 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
         // todo: insert service here
         const cv::Point2f &toTest  = foundPoints[test];
         float distance = cv::norm(s-toTest);
-        if((distance > 0.4-laneWidthOffsetInMeter_ && distance < 0.4 + laneWidthOffsetInMeter_)|| (distance > 0.8-laneWidthOffsetInMeter_ && distance < 0.8+laneWidthOffsetInMeter_)){
+        if((distance > laneWidth_-laneWidthOffsetInMeter_ && distance < laneWidth_+laneWidthOffsetInMeter_)|| (distance > 0.8-laneWidthOffsetInMeter_ && distance < 0.8+laneWidthOffsetInMeter_)){
           foundCounter[test]++;
           foundCounter[fp]++;
         }
@@ -462,6 +480,8 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
   //Handle found points
   cv::Point2f diff;
   std::vector<float> distances;
+  // assign lanes
+  // todo: investigate if this can be done more efficiently, f.e. during line detection
   for(int i = 0; i < (int)validPoints.size(); i++){
     float distanceToLeft = cv::norm(validPoints[i]-l.wLeft);
     float distanceToRight= cv::norm(validPoints[i]-l.wRight);
@@ -470,12 +490,14 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
     diff = (l.wLeft - l.wRight)/cv::norm(l.wLeft-l.wRight);
     if(distanceToLeft < distanceToMid && distanceToLeft < distanceToRight){
       //left point
-      validPoints[i]-=diff*0.4;
+      validPoints[i]-=diff*laneWidth_;
       distances.push_back(distanceToLeft);
     }else if(distanceToRight < distanceToMid ){
-      validPoints[i]+=diff*0.4;
+      // right lane
+      validPoints[i]+=diff*laneWidth_;
       distances.push_back(distanceToRight);
     }else{
+      // middle lane
       distances.push_back(distanceToMid);
     }
   }
