@@ -246,6 +246,20 @@ void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const
 }
 
 bool RoadDetection::find(){
+//  // just to test if shit is valid:
+//  ROS_INFO_STREAM("Initial point: "<<road_points_buffer_[1]);
+//  geometry_msgs::PointStamped test_point;
+//  image_operator_.transformPointToImageFrame(road_points_buffer_[1],test_point);
+//  ROS_INFO_STREAM("Transformed to image frame: "<<test_point);
+//  cv::Point3d to_point(test_point.point.x,test_point.point.y,test_point.point.z);
+//  cv::Point image_point;
+//  image_operator_.worldToImage(to_point, image_point);
+//  ROS_INFO_STREAM("Image point: "<<image_point);
+//  cv::Point2f back_to_world;
+//  image_operator_.imageToWorld(image_point,back_to_world);
+//  ROS_INFO_STREAM("Back in world: "<<back_to_world);
+//  return true;
+
   //clear old lines
   ROS_INFO("Creating new lines");
   lines_.clear();
@@ -515,7 +529,7 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
   drive_ros_msgs::RoadLane lane_out;
   lane_out.header.stamp = ros::Time::now();
   geometry_msgs::PointStamped point_temp;
-  point_temp.header.frame_id = std::string("/rear_axis_middle");
+  point_temp.header.frame_id = std::string("rear_axis_middle_ground");
   point_temp.point.z = 0.f;
   for (auto point: validPoints) {
     point_temp.point.x = point.x;

@@ -320,6 +320,7 @@ public:
   }
 
   bool imageToWorld(const cv::Point& image_point, cv::Point2f& world_point, std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
+//    ROS_INFO_STREAM("Target frame: "<<target_frame);
     if(!homography_received_ || !camera_model_received_) {
       if (!homography_received_)
         ROS_WARN_STREAM("[ImageToWorld] Homography not received yet, skipping image to world transformation requested for image point "<<image_point<<" and returning world Point2f (0.0,0.0)");
@@ -363,6 +364,8 @@ public:
     tf::Vector3 plane_normal(0,0,1);
     tf::Vector3 plane_point(0,0,0);
     tf::pointMsgToTF(camera_point_world.point, ray_point_tf);
+//    ROS_INFO_STREAM("TRANSFORM ORIGIN x:"<<transform.getOrigin().x()<<" y: "<<transform.getOrigin().y()<<" z: "<<transform.getOrigin().z());
+//    ROS_INFO_STREAM("RAY_POINT: "<<camera_point_world.point);
     tf::Vector3 ray_dir = ray_point_tf - transform.getOrigin();
     double denom = plane_normal.dot(ray_dir);
 
@@ -472,6 +475,9 @@ public:
     cv::Mat debug_points;
     cv::namedWindow("Points found in image", CV_WINDOW_NORMAL);
     cv::cvtColor(current_image, debug_points, cv::COLOR_GRAY2BGR);
+    cv::circle(debug_points,sl.iStart,2,cv::Scalar(255,0,0));
+    cv::circle(debug_points,sl.iEnd,2,cv::Scalar(255,0,0));
+    cv::line(debug_points,sl.iStart,sl.iEnd,cv::Scalar(0,0,255));
     for (auto point: imagePoints) {
       cv::circle(debug_points,point,3,cv::Scalar(0,255,0));
     }
@@ -480,7 +486,7 @@ public:
 
     // safety check: width of segment is in bounds
     for (int i=0; i<imagePoints.size(); ++i) {
-      ROS_INFO_STREAM("Lower width bound: "<<pxlPeakWidth*config_.minLineWidthMul<<" upper width bound: "<<pxlPeakWidth*config_.maxLineWidthMul);
+//      ROS_INFO_STREAM("Lower width bound: "<<pxlPeakWidth*config_.minLineWidthMul<<" upper width bound: "<<pxlPeakWidth*config_.maxLineWidthMul);
       if (lineWidths[i] > pxlPeakWidth*config_.minLineWidthMul && lineWidths[i] < pxlPeakWidth*config_.maxLineWidthMul) {
         imageToWorld(imagePoints[i], wMid);
         ROS_INFO_STREAM("Found world point "<<wMid);
@@ -582,28 +588,29 @@ public:
       }
     } else if (search_meth == search_method::sobel) {
 //      ROS_INFO_STREAM("SOBEL MAT: "<<processed_image);
+//      ROS_INFO_STREAM("Image size: "<<processed_image.size()<<"point in corner: "<<sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x));
       bool lowhigh_found = false;
       int first = 0;
       cv::Point first_pos;
-      cv::LineIterator it(processed_image, cv::Point(0,0), sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x));
+      cv::LineIterator it(processed_image, cv::Point(0,0), sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1));
       // the same search line can find multiple line segments
       for(int i=0; i<it.count; ++i, ++it)
       {
-//        ROS_INFO_STREAM("processed_image at: "<<processed_image.at<short int>(it.pos())<<" position: "<<it.pos());
+//        ROS_INFO_STREAM("processed_image at: "<<processed_image.at<signed short>(it.pos())<<" position: "<<it.pos());
         if (processed_image.at<short int>(it.pos()) > config_.sobelThreshold) {
           lowhigh_found = true;
           first = i;
           first_pos = it.pos();
-        } else if (lowhigh_found && processed_image.at<short int>(it.pos()) < -config_.sobelThreshold) {
+        } else if (lowhigh_found && processed_image.at<signed short>(it.pos()) < -config_.sobelThreshold) {
           line_widths.push_back(i-first);
-          // we are not actually using search directions fully here as we also allow diagonal points to be found
+          // we are not actually using search directions only but all directions
+          // todo: make dynamic kernel based on direction
           if (search_dir == search_direction::x) {
             image_points.push_back((it.pos()+first_pos)/2+first_pos+sl.iStart);
           }
           else if (search_dir == search_direction::y) {
 //            ROS_INFO_STREAM("MEAN POINT OF: "<<it.pos()<<" and first: "<<first_pos<<" is: "<<cv::Point((it.pos()+first_pos)/2));
             image_points.push_back(cv::Point((it.pos()+first_pos)/2+sl.iStart));
-//            image_points.push_back(cv::Point(sl.iStart.x,sl.iStart.y);
           }
           lowhigh_found = false;
         }

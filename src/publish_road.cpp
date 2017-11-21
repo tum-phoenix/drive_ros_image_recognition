@@ -22,17 +22,17 @@ int main(int argc, char** argv)
 
     drive_ros_msgs::RoadLane my_road;
     my_road.header.stamp = ros::Time::now();
-    my_road.header.frame_id = "front_axis_middle";
+    my_road.header.frame_id = "rear_axis_middle_ground";
     my_road.points.resize(2);
     geometry_msgs::PointStamped point;
     point.header.stamp = ros::Time::now();
-    point.header.frame_id = "front_axis_middle";
-    point.point.x = 0.1;
+    point.header.frame_id = "rear_axis_middle_ground";
+    point.point.x = 0.4;
     point.point.y = 0.0;
     point.point.z = 0.0;
     my_road.points[0] = point;
     point_stamped_pub.publish(point);
-    point.point.x = 0.2;
+    point.point.x = 0.5;
     point.point.y = 0.0;
     point.point.z = 0.0;
     my_road.points[1] = point;
