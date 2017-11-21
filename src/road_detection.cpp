@@ -19,6 +19,7 @@ RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
   laneWidthOffsetInMeter_(0.1),
   translateEnvironment_(false),
   useWeights_(false),
+  laneWidth_(0.4),
   line_output_pub_(),
   it_(nh),
 #ifdef PUBLISH_DEBUG
@@ -32,10 +33,11 @@ RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
   linesToProcess_(0),
   current_image_(),
   road_points_buffer_(),
-  image_operator_(),
-  img_sub_debug_()
+  image_operator_()
+,  img_sub_debug_()
+, mutex_()
 #ifdef PUBLISH_WORLD_POINTS
-  ,world_point_pub()
+  ,world_point_pub_()
 #endif
 {
 }
@@ -101,21 +103,30 @@ bool RoadDetection::init() {
   dsrv_server_.setCallback(dsrv_cb_);
 
 #ifdef PUBLISH_WORLD_POINTS
-  world_point_pub = pnh_.advertise<geometry_msgs::PointStamped>("worldPoints", 1000);
+  world_point_pub_ = pnh_.advertise<geometry_msgs::PointStamped>("worldPoints", 1000);
 #endif
 
   // to synchronize incoming images and the road, we use message filters
-//  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 1000));
-//  road_sub_.reset(new message_filters::Subscriber<RoadLane>(pnh_,"road_in", 1000));
-//  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(100), *img_sub_, *road_sub_));
-//  sync_->setAgePenalty(1.0);
+//  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 10));
+  img_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(nh_,"/warped_image",5));
+
+//  message_filters::Subscriber<sensor_msgs::Image> test_sub(pnh_,"img_in", 1000);
+  road_sub_.reset(new message_filters::Subscriber<drive_ros_msgs::RoadLane>(pnh_,"/road_detection/road_in", 5));
 //  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
 
-  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
+  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(5), *img_sub_, *road_sub_));
+//  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(1), *img_sub_, test_sub));
+//  sync_->setAgePenalty(1.0);
+  ROS_INFO("BEFORE REGISTERING CALLBACK");
+  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
+
+  // Debug callbacks for testing
+//  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
 //  img_sub_debug_ = it_.subscribe("img_in", 1000, boost::bind(&RoadDetection::debugDrawFrameCallback, this,
 //                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
 
   line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
+  ROS_INFO("COMPLETED");
 
 #ifdef PUBLISH_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);
@@ -178,11 +189,23 @@ void RoadDetection::debugDrawFrameCallback(const sensor_msgs::ImageConstPtr& img
 }
 
 void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in){
+  ROS_INFO("IN SYNC CALLBACK!");
+
   current_image_ = convertImageMessage(img_in);
+  // set image checkbox in order to verfiy that transformed points are inside the image
+  // todo: add parameter for this
+  int rect_offset = 64;
+  image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
   road_points_buffer_ = road_in->points;
+  // debug image display
+//  cv::namedWindow("cutout window", CV_WINDOW_NORMAL);
+//  cv::imshow("cutout window", (*current_image_)(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset)));
+//  cv::waitKey(1);
+
+  std::lock_guard<std::mutex> guard(mutex_);
 
   //if we have a road(?), try to find the line
-  if(road_in->points.size() > 1){
+  if(road_in->points.size() >= 1){
     find(); //TODO use bool from find
   } else {
     ROS_WARN("Road buffer has no points stored");
@@ -227,58 +250,107 @@ bool RoadDetection::find(){
   ROS_INFO("Creating new lines");
   lines_.clear();
   linesToProcess_ = 0;
+  // we want at least two line points, otherwise we will simply not have any lines (duh)
+  if (road_points_buffer_.size() < 2) {
+    ROS_WARN("Less than 2 points in received RoadLane message - not using it.");
+    return false;
+  }
 
   //create left/mid/right lane
   linestring mid, left, right;
-  for (auto point : road_points_buffer_) {
-    boost::geometry::append(mid,point_xy(point.x, point.y));
+  // we actually have to move the points in image frame first, and then transform them -> make more efficient later
+  // either move boost to 3d points, or store the z coordinate somehow
+  // for now redundant transforms
+  for (geometry_msgs::PointStamped& point_stamped : road_points_buffer_) {
+    boost::geometry::append(mid,point_xy(point_stamped.point.x, point_stamped.point.y));
   }
   // simplify mid (previously done with distance-based algorithm
   // skip this for now, can completely clear the line
 //  drive_ros_geometry_common::simplify(mid, mid, distanceBetweenSearchlines_);
-  drive_ros_geometry_common::moveOrthogonal(mid, left, -0.4);
-  drive_ros_geometry_common::moveOrthogonal(mid, right, 0.4);
+  drive_ros_geometry_common::moveOrthogonal(mid, left, -laneWidth_);
+  drive_ros_geometry_common::moveOrthogonal(mid, right, laneWidth_);
   if(mid.size() != left.size() || mid.size() != right.size()){
     ROS_ERROR("Generated lane sizes do not match! Aborting search!");
     return false;
   }
-  //get all lines
+
+  // make transforms from whatever frame the points are in to the world
+  // this is ugly, put it here just to test if it works for now
+  geometry_msgs::PointStamped moved_point;
+  geometry_msgs::PointStamped moved_point_camera;
+  // assuming all points in message are in the same frame (they should)
+  moved_point.header.frame_id = road_points_buffer_.front().header.frame_id;
+  linestring mid_temp, left_temp, right_temp;
   auto it_mid = mid.begin();
   auto it_left = left.begin();
   auto it_right = right.begin();
+  auto it_original = road_points_buffer_.begin();
+  for(int it = 0; it<mid.size(); ++it, ++it_mid, ++it_original, ++it_right, ++it_left){
+    moved_point.point.x = it_mid->x();
+    moved_point.point.y = it_mid->y();
+    moved_point.point.z = it_original->point.z;
+    image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
+    boost::geometry::append(mid_temp,point_xy(moved_point_camera.point.x, moved_point_camera.point.y));
+    moved_point.point.x = it_left->x();
+    moved_point.point.y = it_left->y();
+    moved_point.point.z = it_original->point.z;
+    image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
+    boost::geometry::append(left_temp,point_xy(moved_point_camera.point.x, moved_point_camera.point.y));
+    moved_point.point.x = it_right->x();
+    moved_point.point.y = it_right->y();
+    moved_point.point.z = it_original->point.z;
+    image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
+    boost::geometry::append(right_temp,point_xy(moved_point_camera.point.x, moved_point_camera.point.y));
+  }
+
+  mid = mid_temp;
+  right = right_temp;
+  left = left_temp;
+
+  //get all lines
+  it_mid = mid.begin();
+  it_left = left.begin();
+  it_right = right.begin();
+  bool moved_to_mid = false;
   for(int it = 0; it<mid.size(); it++, ++it_mid, ++it_right, ++it_left){
     SearchLine l;
+    moved_to_mid = false;
     // todo: probably wrong, check which exactly to get, will need end and start on the first probably
-    l.wStart = cv::Point2f(it_left->x(),it_left->y());
-    l.wEnd = cv::Point2f(it_right->x(),it_right->y());
     l.wLeft = cv::Point2f(it_left->x(),it_left->y());
     l.wMid = cv::Point2f(it_mid->x(),it_mid->y());
     l.wRight = cv::Point2f(it_right->x(),it_right->y());
-    //check if the part is valid (middle should be always visible)
 
-    cv::Point l_w_start, l_w_end;
-    image_operator_.worldToImage(l.wStart, l.iStart);
-    image_operator_.worldToImage(l.wEnd, l.iEnd);
-    cv::Rect img_rect(cv::Point(),cv::Point(current_image_->cols,current_image_->rows));
-    // if the left side is out of the current view, use middle instead
-    if(!img_rect.contains(l_w_start)){
+    if (!image_operator_.worldToImage(l.wLeft, l.iStart)) {
+      ROS_WARN_STREAM("Unable to transform left line start point "<<l.wStart<<" to image coordinates, trying middle point");
       // try middle lane -> should always be in image
-      l.wStart = cv::Point2f(it_mid->x(),it_mid->y());
-      image_operator_.worldToImage(l.wMid, l.iStart);
-      if(img_rect.contains(l_w_start)){
+      l.wLeft = l.wMid;
+      moved_to_mid = true;
+      if (!image_operator_.worldToImage(l.wLeft, l.iStart)) {
+        ROS_WARN_STREAM("Unable to transform middle line point "<<l.wStart<<" to image");
         continue;
       }
-    // if the right side is out of the current view, use middle instead
-    }else if(!img_rect.contains(l_w_end)){
-      l.wEnd = cv::Point2f(it_mid->x(),it_mid->y());
     }
-
-    image_operator_.worldToImage(l.wStart,l.iStart);
-    image_operator_.worldToImage(l.wEnd,l.iEnd);
+    if (!image_operator_.worldToImage(l.wRight, l.iEnd)) {
+      ROS_WARN_STREAM("Unable to transform left line end point "<<l.wEnd<<" to image coordinates, trying middle point");
+      // if the right side is out of the current view, use middle instead
+      // do not use it if the left point already was moved to the middle as well
+      if (moved_to_mid) {
+        ROS_WARN_STREAM("Left point has already been moved to middle, skipping line");
+        continue;
+      } else {
+        l.wRight = l.wMid;
+        if(!image_operator_.worldToImage(l.wEnd, l.iEnd)) {
+          ROS_WARN_STREAM("Unable to transform middle line point "<<l.wEnd<<" to image");
+          continue;
+        }
+      }
+    }
     lines_.push_back(l);
-    for(SearchLine &l:lines_){
-      processSearchLine(l);
-    }
+  }
+
+  // process search lines
+  for(SearchLine& l:lines_){
+    processSearchLine(l);
   }
   return true;
 }
@@ -420,11 +492,12 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
   // todo: check how this gets handled and adjust the interface
   drive_ros_msgs::RoadLane lane_out;
   lane_out.header.stamp = ros::Time::now();
-  geometry_msgs::Point32 point_temp;
-  point_temp.z = 0.f;
+  geometry_msgs::PointStamped point_temp;
+  point_temp.header.frame_id = std::string("/rear_axis_middle");
+  point_temp.point.z = 0.f;
   for (auto point: validPoints) {
-    point_temp.x = point.x;
-    point_temp.y = point.y;
+    point_temp.point.x = point.x;
+    point_temp.point.y = point.y;
     lane_out.points.push_back(point_temp);
   }
   lane_out.roadStateType = drive_ros_msgs::RoadLane::UNKNOWN;
@@ -439,6 +512,7 @@ void RoadDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
   maxLineWidthMul_ = config.maxLineWidthMul;
   brightness_threshold_ = config.brightness_threshold;
   laneWidthOffsetInMeter_ = config.laneWidthOffsetInMeter;
+  laneWidth_ = config.lineWidth;
   useWeights_ = config.useWeights;
   sobelThreshold_ = config.sobelThreshold;
 }

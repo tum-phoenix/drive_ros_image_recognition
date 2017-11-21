@@ -194,6 +194,27 @@ install(TARGETS street_crossing_node
     )
 
 ################################################################################
+# Road publisher node (LMS port)
+################################################################################
+
+add_executable(publish_road
+    src/publish_road.cpp
+    )
+
+add_dependencies(publish_road ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(publish_road
+    ${catkin_LIBRARIES}
+    )
+
+install(TARGETS publish_road
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+
+################################################################################
 # Install other files
 ################################################################################
 install(FILES nodelets.xml

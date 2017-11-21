@@ -15,7 +15,10 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/time_synchronizer.h>
 #include <image_transport/subscriber_filter.h>
+#include <sensor_msgs/Image.h>
+#include <drive_ros_msgs/RoadLane.h>
 
 // for multithreading
 #include <mutex>
@@ -39,6 +42,7 @@ class RoadDetection {
     bool translateEnvironment_;
     bool useWeights_;
     int sobelThreshold_;
+    double laneWidth_;
 
     // ported in the WarpImage class, ports the entire image already
 //    lms::imaging::Homography homo;
@@ -61,9 +65,11 @@ class RoadDetection {
     // road inputs and outputs
     image_transport::Subscriber img_sub_debug_;
 //    std::unique_ptr<image_transport::SubscriberFilter> img_sub_;
-//    std::unique_ptr<message_filters::Subscriber<RoadLane> > road_sub_;
-//    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, RoadLane> SyncImageToRoad;
-//    std::unique_ptr<message_filters::Synchronizer<SyncImageToRoad> > sync_;
+    std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image> > img_sub_;
+    std::unique_ptr<message_filters::Subscriber<drive_ros_msgs::RoadLane> > road_sub_;
+    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, drive_ros_msgs::RoadLane> SyncImageToRoad;
+    std::unique_ptr<message_filters::Synchronizer<SyncImageToRoad> > sync_;
+//    std::unique_ptr<  message_filters::TimeSynchronizer<sensor_msgs::Image, drive_ros_msgs::RoadLane> > sync_;
     ros::Publisher line_output_pub_;
 #ifdef PUBLISH_DEBUG
     image_transport::Publisher debug_img_pub_;
@@ -72,7 +78,7 @@ class RoadDetection {
 #endif
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
-    std::vector<geometry_msgs::Point32> road_points_buffer_;
+    std::vector<geometry_msgs::PointStamped> road_points_buffer_;
 
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig>::CallbackType dsrv_cb_;
@@ -85,9 +91,10 @@ class RoadDetection {
     bool find();
     void processSearchLine(const SearchLine &line);
 #ifdef PUBLISH_WORLD_POINTS
-    ros::Publisher world_point_pub;
+    ros::Publisher world_point_pub_;
 #endif
     ImageOperator image_operator_;
+    std::mutex mutex_;
 
 public:
     RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);

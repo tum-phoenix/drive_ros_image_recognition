@@ -1,6 +1,6 @@
 <launch>
     <arg name="road_trajectory_topic" default="/road_trajectory"/>
-    <arg name="incoming_image" default="/camera/image_raw"/>
+    <arg name="incoming_image" default="/warped_image"/>
     <arg name="camera_info" default="/camera/camera_info"/>
     <arg name="homography_topic" default="/camera/camera_homography"/>
     <arg name="visual_detection_topic" default="/line_out"/>

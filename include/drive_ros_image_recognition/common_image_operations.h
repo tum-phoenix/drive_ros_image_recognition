@@ -105,7 +105,7 @@ class TransformHelper {
 
 public:
 
-  TransformHelper():
+  TransformHelper(bool use_homography = true):
     tf_listener_(),
     world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
     cam_model_(),
@@ -119,7 +119,9 @@ public:
     camera_model_received_(false),
     // temporary solution until have embedded correct frame in camerainfo messages (including the bag files)
     camera_frame_(""),
-    world_frame_("")
+    world_frame_(""),
+    use_homography_(use_homography),
+    image_rect_(0,0,0,0)
   {
   }
 
@@ -182,7 +184,9 @@ public:
     camera_model_received_(false),
     // temporary solution until have embedded correct frame in camerainfo messages (including the bag files)
     camera_frame_(""),
-    world_frame_("")
+    world_frame_(""),
+    use_homography_(true),
+    image_rect_(0,0,0,0)
   {
   }
 
@@ -226,6 +230,7 @@ public:
   }
 
   void setWorldFrame(const std::string& frame) {
+    ROS_ERROR_STREAM("SETTING WORLD FRAME TO: "<<frame);
     if (camera_frame_ != std::string("")) {
       try {
         ros::Duration timeout(1.0);
@@ -275,13 +280,40 @@ public:
     mat_pixel_coords.at<double>(0,0) = pixel_coords.x;
     mat_pixel_coords.at<double>(0,1) = pixel_coords.y;
     cv::Mat mat_image_point(1,1,CV_64FC2,cv::Scalar(0.0));
-    cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_inv_);
-    image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
-    return true;
+    if (use_homography_) {
+      cv::perspectiveTransform(mat_pixel_coords, mat_image_point, scaling_mat_inv_);
+      image_point = cv::Point(mat_image_point.at<double>(0,0), mat_image_point.at<double>(0,1));
+    }
+    else {
+      // nothing to transform if homography has not been applied
+      image_point = cv::Point(pixel_coords.x, pixel_coords.y);
+    }
+    if (image_rect_.contains(image_point))
+      return true;
+    else {
+      ROS_WARN_STREAM("Transformed image point "<<image_point<<" is out of image bounds");
+      return false;
+    }
   }
 
   bool worldToImage(const cv::Point2f &world_point, cv::Point &image_point) {
     return worldToImage(cv::Point3f(world_point.x, world_point.y, 0.0f), image_point);
+  }
+
+  bool worldToImage(const geometry_msgs::PointStamped& point_in, cv::Point& image_point) {
+    geometry_msgs::PointStamped transformed_point;
+    tf_listener_.transformPoint(camera_frame_,point_in,transformed_point);
+    return worldToImage(cv::Point3f(transformed_point.point.x, transformed_point.point.y, 0.0f), image_point);
+  }
+
+  bool transformPointToImageFrame(const geometry_msgs::PointStamped& point_in, geometry_msgs::PointStamped& point_out) {
+    ROS_INFO("TRANSFORMING TO IMAGE");
+    if (point_in.header.frame_id == camera_frame_) {
+      point_out = point_in;
+    } else {
+      tf_listener_.transformPoint(camera_frame_,point_in,point_out);
+    }
+    return true;
   }
 
   bool imageToWorld(const cv::Point& image_point, cv::Point2f& world_point, std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
@@ -297,7 +329,10 @@ public:
     std::vector<cv::Point2f> obj_corners(1);
     obj_corners[0] = cv::Point2f(image_point.x, image_point.y);
     std::vector<cv::Point2f> scene_corners(1);
-    cv::perspectiveTransform(obj_corners, scene_corners, scaling_mat_);
+    if (homography_received_)
+      cv::perspectiveTransform(obj_corners, scene_corners, scaling_mat_);
+    else
+      scene_corners[0] = obj_corners[0]; // no homography transforms if we use camera image directly
     // this returns a point with z=1, the pixel is on a ray from origin to this point
     cv::Point3d cam_ray_point = cam_model_.projectPixelTo3dRay(scene_corners[0]);
 
@@ -349,8 +384,21 @@ public:
     world2cam_ = world2cam;
   }
 
+  void setUseHomography(const bool use_homography) {
+    use_homography_ = use_homography;
+  }
+
+  const std::string& getCameraFrame() const {
+    return camera_frame_;
+  }
+
+  void setImageRect(const cv::Rect& image_rect) {
+    image_rect_ = image_rect;
+  }
+
 private:
   image_geometry::PinholeCameraModel cam_model_;
+  bool use_homography_;
   bool homography_received_;
   bool camera_model_received_;
   std::string world_frame_;
@@ -364,6 +412,7 @@ private:
   tf::TransformListener tf_listener_;
   ros::Subscriber cam_info_sub_;
   ros::Subscriber homography_sub_;
+  cv::Rect image_rect_;
 }; // class TransformHelper
 
 class ImageOperator : public TransformHelper {
