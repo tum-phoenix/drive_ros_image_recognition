@@ -36,6 +36,9 @@ RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
   image_operator_()
 ,  img_sub_debug_()
 , mutex_()
+, last_received_transform_()
+, tf_listener_()
+, road_hints_buffer_()
 #ifdef PUBLISH_WORLD_POINTS
   ,world_point_pub_()
 #endif
@@ -106,27 +109,40 @@ bool RoadDetection::init() {
   world_point_pub_ = pnh_.advertise<geometry_msgs::PointStamped>("worldPoints", 1000);
 #endif
 
+  // fill initial hints -> straight line with 10cm spacing
+  geometry_msgs::PointStamped temp_point;
+  temp_point.header.frame_id = world_frame;
+  temp_point.point.x = 0;
+  temp_point.point.y = 0;
+  temp_point.point.z = 0;
+  for (int i = 3; i < 7; ++i) {
+    temp_point.point.x = i*0.1;
+    road_points_buffer_.push_back(temp_point);
+  }
+
+  img_sub_ =  it_.subscribe("img_in", 1000, &RoadDetection::imageCallback, this);
+
   // to synchronize incoming images and the road, we use message filters
 //  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 10));
-  img_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(nh_,"/warped_image",5));
+//  img_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(nh_,"/warped_image",5));
 
-//  message_filters::Subscriber<sensor_msgs::Image> test_sub(pnh_,"img_in", 1000);
-  road_sub_.reset(new message_filters::Subscriber<drive_ros_msgs::RoadLane>(pnh_,"/road_detection/road_in", 5));
+////  message_filters::Subscriber<sensor_msgs::Image> test_sub(pnh_,"img_in", 1000);
+//  road_sub_.reset(new message_filters::Subscriber<drive_ros_msgs::RoadLane>(pnh_,"/road_detection/road_in", 5));
+////  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
+
+//  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(5), *img_sub_, *road_sub_));
+////  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(1), *img_sub_, test_sub));
+////  sync_->setAgePenalty(1.0);
+//  ROS_INFO("BEFORE REGISTERING CALLBACK");
 //  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
 
-  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(5), *img_sub_, *road_sub_));
-//  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(1), *img_sub_, test_sub));
-//  sync_->setAgePenalty(1.0);
-  ROS_INFO("BEFORE REGISTERING CALLBACK");
-  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
-
-  // Debug callbacks for testing
-//  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
-//  img_sub_debug_ = it_.subscribe("img_in", 1000, boost::bind(&RoadDetection::debugDrawFrameCallback, this,
-//                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
+//  // Debug callbacks for testing
+////  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
+////  img_sub_debug_ = it_.subscribe("img_in", 1000, boost::bind(&RoadDetection::debugDrawFrameCallback, this,
+////                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
 
   line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
-  ROS_INFO("COMPLETED");
+//  ROS_INFO("COMPLETED");
 
 #ifdef PUBLISH_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);
@@ -141,6 +157,19 @@ bool RoadDetection::init() {
 
   // todo: we have not defined the interface for this yet
   //    car = readChannel<street_environment::CarCommand>("CAR"); //TODO create ego-estimation service
+
+  try {
+    ros::Duration timeout(1);
+    tf_listener_.waitForTransform("/odom", world_frame,
+                                  ros::Time::now(), timeout);
+    tf_listener_.lookupTransform("/odom", world_frame,
+                                 ros::Time::now(), last_received_transform_);
+  }
+  catch (tf::TransformException& ex) {
+    ROS_WARN("[debugDrawFrameCallback] TF exception:\n%s", ex.what());
+    return false;
+  }
+
   return true;
 }
 
@@ -188,9 +217,43 @@ void RoadDetection::debugDrawFrameCallback(const sensor_msgs::ImageConstPtr& img
   cv::waitKey(1);
 }
 
-void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in){
-  ROS_INFO("IN SYNC CALLBACK!");
+void RoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
+  // transform hint points to the next moved frame
+//  tf::Transform point_transform;
+//  tf::Transform temp_transform;
+//  tf_listener_.lookupTransform("/odom", image_operator_.getWorldFrame(), road_in->points.front().header.stamp, temp_transform);
+//  point_transform = last_received_transform_.inverseTimes(temp_transform);
 
+  // maybe tf is smart enough to use based on the stamps and do this
+  std::vector<geometry_msgs::PointStamped> moved_points;
+  geometry_msgs::PointStamped temp_point;
+  for (const geometry_msgs::PointStamped& last_point : road_points_buffer_) {
+    tf_listener_.transformPoint(image_operator_.getWorldFrame(), last_point, temp_point);
+    moved_points.push_back(temp_point);
+  }
+
+  int rect_offset = 64;
+  image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
+
+  std::lock_guard<std::mutex> guard(mutex_);
+
+  // since we are handling hints internally we cannot have no hints at all
+  find();
+
+  if (road_points_buffer_.size() != road_hints_buffer_.size()) {
+    ROS_WARN_STREAM("Sizes of new hint points and the last frame hint buffer do not match, using last hints unchanged");
+    return;
+  }
+
+  // will skip steps in which it failed to find a valid lane midpoint (more than 2 points for now)
+  for (int i=0; i<road_hints_buffer_.size(); ++i)
+    if (road_hints_buffer_[i].point.x != 0.0 || road_hints_buffer_[i].point.z != 0.0)
+      road_points_buffer_[i] = road_hints_buffer_[i];
+
+  return;
+}
+
+void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in){
   current_image_ = convertImageMessage(img_in);
   // set image checkbox in order to verfiy that transformed points are inside the image
   // todo: add parameter for this
@@ -251,7 +314,7 @@ bool RoadDetection::find(){
 //  geometry_msgs::PointStamped test_point;
 //  image_operator_.transformPointToImageFrame(road_points_buffer_[1],test_point);
 //  ROS_INFO_STREAM("Transformed to image frame: "<<test_point);
-//  cv::Point3d to_point(test_point.point.x,test_point.point.y,test_point.point.z);
+//  cv::Point3d to_point(test_bpoint.point.x,test_point.point.y,test_point.point.z);
 //  cv::Point image_point;
 //  image_operator_.worldToImage(to_point, image_point);
 //  ROS_INFO_STREAM("Image point: "<<image_point);
@@ -365,12 +428,12 @@ bool RoadDetection::find(){
 
   // process search lines
   for(SearchLine& l:lines_){
-    processSearchLine(l);
+    road_hints_buffer_.push_back(processSearchLine(l));
   }
   return true;
 }
 
-void RoadDetection::processSearchLine(const SearchLine &l) {
+geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l) {
 //  std::vector<int> xv;
 //  std::vector<int> yv;
 
@@ -411,6 +474,10 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
 
   if (foundPoints.size() != 0)
     ROS_INFO_STREAM("Found "<<foundPoints.size()<<" points in image!");
+
+//  bool crossing_found;
+//  if (foundPoints.size() > 6)
+//    crossing_found = true;
 
   // draw unfiltered image points
 //#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
@@ -538,6 +605,19 @@ void RoadDetection::processSearchLine(const SearchLine &l) {
   }
   lane_out.roadStateType = drive_ros_msgs::RoadLane::UNKNOWN;
   line_output_pub_.publish(lane_out);
+
+  geometry_msgs::PointStamped hint_point;
+  hint_point.header.frame_id = image_operator_.getWorldFrame();
+  hint_point.point.x = 0.0;
+  hint_point.point.y = 0.0;
+  hint_point.point.z = 0.0;
+  // simple method: if we have two points -> average between them
+  if (validPoints.size() == 2) {
+    cv::Point2f next_hint_point = (validPoints[1] + validPoints[0])/2;
+    hint_point.point.x = next_hint_point.x;
+    hint_point.point.y = next_hint_point.y;
+  }
+  return hint_point;
 }
 
 void RoadDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig &config, uint32_t level){

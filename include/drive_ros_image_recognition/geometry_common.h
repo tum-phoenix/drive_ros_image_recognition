@@ -18,6 +18,42 @@ namespace drive_ros_geometry_common {
 const trans::rotate_transformer<boost::geometry::degree, double, 2, 2> rotate(90.0);
 
 template<typename Segment>
+struct lengthHelper{
+    lengthHelper(double length) : length_(length){}
+
+    inline void operator()(Segment &s){
+      double length = boost::geometry::distance(s.first, s.second);
+      if(length > 0){
+          // normalize
+          trans::scale_transformer<double, 2, 2> scale(length_/length);
+          boost::geometry::transform(s, s, scale);
+      }
+    }
+
+    double length_;
+};
+
+template<typename Segment>
+struct translateHelper{
+    translateHelper(double offset) : offset_(offset){}
+
+    inline void operator()(Segment &s){
+      double length = boost::geometry::distance(s.first, s.second);
+      if(length > 0){
+          // translate
+          segment_hc trans;
+          trans::scale_transformer<double, 2, 2> norm_trans(1/length);
+          boost::geometry::transform(s, trans, norm_trans);
+          trans::translate_transformer<double, 2, 2> translate( (bg::get<0>(trans.second) - bg::get<0>(trans.first))*offset_,
+                                                               (bg::get<1>(trans.second) - bg::get<1>(trans.first))*offset_);
+          boost::geometry::transform(s, s, translate);
+      }
+    }
+
+    double offset_;
+};
+
+template<typename Segment>
 struct orthogonalHelper{
     orthogonalHelper(double distance) : distance_(distance){}
 
@@ -42,10 +78,23 @@ struct orthogonalHelper{
 };
 
 
-inline void moveOrthogonal (const linestring &lines_in, linestring &lines_out, double distance) {
+inline void moveOrthogonal(const linestring &lines_in, linestring &lines_out, double distance) {
   lines_out = lines_in;
   orthogonalHelper<segment> helper(distance);
   bg::for_each_segment(lines_out, helper);
+  return ;
+}
+
+inline void moveVertical(const linestring &lines_in, linestring& lines_out, double offset) {
+  lines_out = lines_in;
+  translateHelper<segment> helper(offset);
+  bg::for_each_segment(lines_out, helper);
+  return ;
+}
+
+inline void rescaleLength (linestring &lines_in, double length) {
+  lengthHelper<segment> helper(length);
+  bg::for_each_segment(lines_in, helper);
   return ;
 }
 

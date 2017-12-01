@@ -9,6 +9,7 @@
 #include <drive_ros_image_recognition/LineDetectionConfig.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <drive_ros_msgs/Homography.h>
+#include <drive_ros_image_recognition/geometry_common.h>
 
 typedef boost::shared_ptr<cv::Mat> CvImagePtr;
 
@@ -37,6 +38,12 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
 }
 
 namespace drive_ros_image_recognition {
+
+inline void geometrypointsToLinestring(const std::vector<geometry_msgs::PointStamped>& geometry_points, linestring& line_out) {
+  for (const geometry_msgs::PointStamped& point_stamped : geometry_points) {
+    boost::geometry::append(line_out,point_xy(point_stamped.point.x, point_stamped.point.y));
+  }
+}
 
 inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_in, cv::Mat& cam2world, cv::Mat& world2cam,
                                 cv::Mat& scaling_mat, cv::Mat& scaling_mat_inv, bool& homography_received) {
@@ -319,7 +326,7 @@ public:
     return true;
   }
 
-  bool imageToWorld(const cv::Point& image_point, cv::Point2f& world_point, std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
+  bool imageToWorld(const cv::Point& image_point, cv::Point2f& world_point, const std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
 //    ROS_INFO_STREAM("Target frame: "<<target_frame);
     if(!homography_received_ || !camera_model_received_) {
       if (!homography_received_)
@@ -382,6 +389,37 @@ public:
     }
   }
 
+  void linestringToImageFrame(const linestring& linestring, std::vector<cv::Point3d>& image_frame_points, const std::string& frame_id) {
+    geometry_msgs::PointStamped moved_point, moved_point_camera;
+    moved_point.header.frame_id = frame_id;
+    for (auto it = linestring.begin(); it != linestring.end(); ++it) {
+      moved_point.point.x = it->x();
+      moved_point.point.y = it->y();
+      transformPointToImageFrame(moved_point,moved_point_camera);
+      image_frame_points.push_back(cv::Point3d(moved_point_camera.point.x, moved_point_camera.point.y, moved_point_camera.point.z));
+    }
+  }
+
+  void imageFramePointsToImage(const std::vector<cv::Point3d>& image_frame_points, std::vector<cv::Point>& image_points) {
+     cv::Point image_coordinate;
+     for (const cv::Point3d& image_frame_coordinate: image_frame_points) {
+       if (worldToImage(image_frame_coordinate, image_coordinate))
+         image_points.push_back(image_coordinate);
+     }
+  }
+
+  void linestringToImageCoordinates(const linestring& linestring, std::vector<cv::Point>& image_points, const std::string& frame_id) {
+    std::vector<cv::Point3d> image_frame_points;
+    linestringToImageFrame(linestring, image_frame_points, frame_id);
+    imageFramePointsToImage(image_frame_points, image_points);
+  }
+
+  bool imageToWorld(const cv::Point& image_point, point_xy& world_point, const std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
+    cv::Point2f world_point_cv;
+    imageToWorld(image_point, world_point_cv, target_frame, test_image);
+    world_point = point_xy(world_point_cv.x, world_point_cv.y);
+  }
+
   void setcam2worldMat(const cv::Mat& cam2world) {
     cam2world_ = cam2world;
   }
@@ -400,6 +438,10 @@ public:
 
   void setImageRect(const cv::Rect& image_rect) {
     image_rect_ = image_rect;
+  }
+
+  std::string getWorldFrame() const {
+    return world_frame_;
   }
 
 private:
@@ -481,6 +523,8 @@ public:
     for (auto point: imagePoints) {
       cv::circle(debug_points,point,3,cv::Scalar(0,255,0));
     }
+    if (imagePoints.size() > 6)
+      cv::putText(debug_points,std::string("CROSSING FOUND"),cv::Point(0,0),cv::FONT_HERSHEY_SIMPLEX,3.0,cv::Scalar(255,255,255));
     cv::imshow("Points found in image", debug_points);
 #endif
 

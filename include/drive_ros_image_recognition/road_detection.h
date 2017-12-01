@@ -44,6 +44,10 @@ class RoadDetection {
     int sobelThreshold_;
     double laneWidth_;
 
+    // temporary testing of hint adjustement
+    tf::StampedTransform last_received_transform_;
+    tf::TransformListener tf_listener_;
+
     // ported in the WarpImage class, ports the entire image already
 //    lms::imaging::Homography homo;
     //Datachannels
@@ -64,11 +68,13 @@ class RoadDetection {
     image_transport::ImageTransport it_;
     // road inputs and outputs
     image_transport::Subscriber img_sub_debug_;
+    // hints are handled internally now
+    image_transport::Subscriber img_sub_;
 //    std::unique_ptr<image_transport::SubscriberFilter> img_sub_;
-    std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image> > img_sub_;
-    std::unique_ptr<message_filters::Subscriber<drive_ros_msgs::RoadLane> > road_sub_;
-    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, drive_ros_msgs::RoadLane> SyncImageToRoad;
-    std::unique_ptr<message_filters::Synchronizer<SyncImageToRoad> > sync_;
+//    std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image> > img_sub_;
+//    std::unique_ptr<message_filters::Subscriber<drive_ros_msgs::RoadLane> > road_sub_;
+//    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, drive_ros_msgs::RoadLane> SyncImageToRoad;
+//    std::unique_ptr<message_filters::Synchronizer<SyncImageToRoad> > sync_;
 //    std::unique_ptr<  message_filters::TimeSynchronizer<sensor_msgs::Image, drive_ros_msgs::RoadLane> > sync_;
     ros::Publisher line_output_pub_;
 #ifdef PUBLISH_DEBUG
@@ -79,6 +85,7 @@ class RoadDetection {
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
     std::vector<geometry_msgs::PointStamped> road_points_buffer_;
+    std::vector<geometry_msgs::PointStamped> road_hints_buffer_;
 
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
     dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig>::CallbackType dsrv_cb_;
@@ -86,10 +93,11 @@ class RoadDetection {
     void debugDrawFrameCallback(const sensor_msgs::ImageConstPtr& img_in,
                                 const std::string camera_frame,
                                 const std::string draw_frame);
+    void imageCallback(const sensor_msgs::ImageConstPtr& img_in);
     void syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in);
     void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
     bool find();
-    void processSearchLine(const SearchLine &line);
+    geometry_msgs::PointStamped processSearchLine(const SearchLine &line);
 #ifdef PUBLISH_WORLD_POINTS
     ros::Publisher world_point_pub_;
 #endif

@@ -34,6 +34,7 @@ find_package(Boost REQUIRED)
 
 generate_dynamic_reconfigure_options(
   cfg/LineDetection.cfg
+  cfg/CrossingDetection.cfg
 )
 
 catkin_package(
