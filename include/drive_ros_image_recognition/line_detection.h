@@ -24,6 +24,9 @@ private:
 
   // configs
   float lineWidth_;
+  float lineAngle_;
+  float lineVar_;
+  float maxViewRange_;
   int cannyThreshold_;
   int houghThresold_;
   int houghMinLineLen_;
@@ -39,6 +42,7 @@ private:
   image_transport::Subscriber imageSubscriber_;
   ros::Publisher line_output_pub_; // note: not used yet
   ros::Subscriber homography_params_sub_;
+  image_transport::Publisher debugImgPub_;
 
   // homography components
   cv::Mat world2cam_;

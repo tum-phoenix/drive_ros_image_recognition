@@ -10,7 +10,7 @@
     <arg unless="$(arg debug)" name="launch-prefix" value=""/>
 
     <group unless="$(arg use_nodelet)">
-        <node name="street_crossing" pkg="drive_ros_image_recognition" type="street_crossing_node" respawn="false" output="screen" launch-prefix="$(arg launch-prefix)">
+        <node name="line_detection" pkg="drive_ros_image_recognition" type="line_detection_node" respawn="false" output="screen" launch-prefix="$(arg launch-prefix)">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>

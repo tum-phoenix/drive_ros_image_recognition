@@ -257,6 +257,9 @@ public:
   /// \return true on success, false on failure.
   ///
   bool imageToWorld(std::vector<cv::Point2f> &imagePoints, std::vector<cv::Point2f> &worldPoints) {
+    if(imagePoints.empty()) {
+      return false;
+    }
     if(!homography_received_) {
       ROS_WARN_STREAM("[imagetoWorld] Homography not received yet");
       return false;
@@ -275,6 +278,9 @@ public:
   /// \return true on success, false on failure.
   ///
   bool worldToImage(std::vector<cv::Point2f> &worldPoints, std::vector<cv::Point2f> &imagePoints) {
+    if(worldPoints.empty()) {
+      return false;
+    }
     if(!homography_received_) {
       ROS_WARN_STREAM("[worldToImage] Homography not received yet");
       return false;

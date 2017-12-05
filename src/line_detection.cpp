@@ -2,8 +2,9 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <vector>
 #include <chrono>
-#include "drive_ros_image_recognition/line_detection.h"
 #include <pluginlib/class_list_macros.h>
+#include "drive_ros_image_recognition/line_detection.h"
+#include "drive_ros_image_recognition/geometry_common.h"
 
 namespace drive_ros_image_recognition {
 
@@ -34,6 +35,8 @@ bool LineDetection::init() {
   //subscribe to camera image
   imageSubscriber_ = imageTransport_.subscribe("img_in", 10, &LineDetection::imageCallback, this);
   ROS_INFO_STREAM("Subscribed image transport to topic " << imageSubscriber_.getTopic());
+
+  debugImgPub_ = imageTransport_.advertise("line_detection/debug_image", 10);
 
   // common image operations
   if(!image_operator_.init()) {
@@ -118,7 +121,7 @@ void LineDetection::findLane() {
     Line sl(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1));
     filteredLines.push_back(sl);
 #ifdef DRAW_DEBUG
-    cv::line(allLinesImg, sl.iP1_, sl.iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+//    cv::line(allLinesImg, sl.iP1_, sl.iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
 #endif
   }
 
@@ -126,6 +129,7 @@ void LineDetection::findLane() {
   worldPoints.clear();
   imagePoints.clear();
   if(currentLane_.empty()) {
+    ROS_INFO_STREAM("dummy guess");
     worldPoints.push_back(cv::Point2f(0.24, 0.5));
     worldPoints.push_back(cv::Point2f(0.4, 0.5));
     worldPoints.push_back(cv::Point2f(0.55, 0.5));
@@ -141,9 +145,10 @@ void LineDetection::findLane() {
 
 #ifdef DRAW_DEBUG
   // Draw our "guess" (previous middle line)
-  for(size_t i = 0; i < currentLane_.size(); i++) {
-    cv::line(outputImg, currentLane_.at(i).iP1_, currentLane_.at(i).iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-  }
+//  for(size_t i = 0; i < currentLane_.size(); i++) {
+//    cv::line(outputImg, currentLane_.at(i).iP1_, currentLane_.at(i).iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+//  }
+// todo: we could draw the search corridor here
 #endif
 
   // Use the guess to classify the lines
@@ -151,7 +156,7 @@ void LineDetection::findLane() {
   for(Line sl : filteredLines) {
     Line segment = currentLane_.at(0);
       bool isInSegment = false;
-      // find the coresponding segment
+      // find the corresponding segment
       // todo: this only uses the x-coordinate right now, improve this
       for(size_t i = 0; (i < currentLane_.size()) && !isInSegment; i++) {
         segment = currentLane_.at(i);
@@ -166,24 +171,28 @@ void LineDetection::findLane() {
 
       if(isInSegment) {
         // classify the line
-        // lane width is 0.35 to 0.45 [m]
-        auto distanceToMidLine = sl.wMid_.y - segment.wMid_.y;
-        if(std::abs(distanceToMidLine) < 0.175) {
-          middleLine.push_back(sl);
+        if(std::abs(sl.getAngle() - segment.getAngle()) < lineAngle_) {
+          // lane width is 0.35 to 0.45 [m]
+          // todo: distance should be calculated based on orthogonal distance. currently this leads to problems in curves
+          auto absDistanceToMidLine = std::abs(sl.wMid_.y - segment.wMid_.y);
+          if(absDistanceToMidLine < (lineWidth_ / 2)) {
+            middleLine.push_back(sl);
 #ifdef DRAW_DEBUG
-          cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
+            cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
 #endif
-        } else if((sl.wMid_.y < segment.wMid_.y) && (std::abs(distanceToMidLine) < .6)) {
-          rightLine.push_back(sl);
+          } else if((sl.wMid_.y < segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
+            rightLine.push_back(sl);
 #ifdef DRAW_DEBUG
-          cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
+            cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
 #endif
-        } else if(distanceToMidLine < .6) {
-          leftLine.push_back(sl);
+          } else if((sl.wMid_.y > segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
+            leftLine.push_back(sl);
 #ifdef DRAW_DEBUG
-          cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
+            cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
 #endif
+          }
         } else {
+          // todo: here we still have to check the distance from our lane
 #ifdef DRAW_DEBUG
           cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255, 255), 2, cv::LINE_AA);
 #endif
@@ -191,48 +200,167 @@ void LineDetection::findLane() {
       }
   }
 
-  // Use the new middle line as our new guess
-//  currentLane_.clear();
-////  for(auto l : middleLine)
-////    currentLane_.push_back(l);
+  if(middleLine.empty()) {
+    ROS_INFO_STREAM("no middle line found");
+    currentLane_.clear();
+    debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, outputImg).toImageMsg());
+    return;
+  }
 
-//  // sort the middle lines based on the front distance of the vehicle
-////  std::sort(middleLine.begin(), middleLine.end(), [](const Line& a, const Line& b){ return a.wMid_.x < b.wMid_.x; });
-//  std::vector<cv::Point2f> guessImgPoints, guessWorldPoints;
-//  for(auto lineIt = middleLine.begin(); lineIt != middleLine.end(); ++lineIt) {
-//    guessWorldPoints.push_back(lineIt->wP1_);
-//    guessWorldPoints.push_back(lineIt->wP2_);
-//  }
-//  std::sort(guessWorldPoints.begin(), guessWorldPoints.end(), [](const cv::Point2f& a, const cv::Point2f& b){ return a.x < b.x; });
-//  // now add another lane as the last one to extend our current lane
-//  cv::Point lastLineDirection = guessWorldPoints.at(guessWorldPoints.size() - 1) - guessWorldPoints.at(guessWorldPoints.size() - 2);
-//  auto normFactor = 1 / cv::norm(lastLineDirection);
-//  ROS_INFO_STREAM("normFactor=" << normFactor);
+  // middle line is 0.2m long and then interrupted for 0.2m
+  // sort our middle lines based on wP1_.x of line
+  std::sort(middleLine.begin(), middleLine.end(), [](Line &a, Line &b){ return a.wP1_.x < b.wP1_.x; });
+  // build bounding boxes around group of lines, where lines in group are closer than 0.3m to each other
+  float currentMinX = middleLine.at(0).wP1_.x;
+  std::vector<cv::Point2f> cPts, newMidLinePts;
+  for(auto l : middleLine) {
+    if(l.wP1_.x > (currentMinX + 0.3)) {
+      auto rect = cv::minAreaRect(cPts);
+      cv::Point2f a, b;
+      cv::Point2f vertices2f[4];
+      rect.points(vertices2f);
 
-//  if((guessWorldPoints.size() > 0) && (image_operator_.worldToImage(guessWorldPoints, guessImgPoints))) {
-//    for(size_t i = 1; i < guessImgPoints.size(); i++) {
-//      currentLane_.push_back(Line(guessImgPoints.at(i - 1), guessImgPoints.at(i), guessWorldPoints.at(i - 1), guessWorldPoints.at(i)));
-//    }
+      currentMinX = l.wP1_.x;
 
-//  }
-  
+      // todo: this should be in a function, since we are using it again after the for loop
+      // use the long side as line
+      if(std::abs(vertices2f[0].x - vertices2f[1].x) > std::abs(vertices2f[1].x - vertices2f[2].x)) {
+        a = vertices2f[0];
+        b = vertices2f[1];
+      } else {
+        a = vertices2f[1];
+        b = vertices2f[2];
+      }
+      // ensures the right order of the points in newMidLinePts vector
+      if(a.x > b.x) {
+        newMidLinePts.push_back(b);
+        newMidLinePts.push_back(a);
+      } else {
+        newMidLinePts.push_back(a);
+        newMidLinePts.push_back(b);
+      }
 
-        // angle classification
-//      if((a > (CV_PI/6)) && (a < 2.6)) {
-//        // lane marking
-//        cv::line(outputImg, l.iP1_, l.iP2_, cv::Scalar(0,255), 2, cv::LINE_AA);
-//      } else {
-//        // stop or start line
-//        cv::line(outputImg, l.iP1_, l.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
-//      }
+      cPts.clear();
+    }
+    cPts.push_back(l.wP1_);
+    cPts.push_back(l.wP2_);
+  }
 
-#ifdef DRAW_DEBUG
-  cv::namedWindow("All Lines", CV_WINDOW_NORMAL);
-  cv::imshow("All Lines", allLinesImg);
-  cv::namedWindow("Debug Image", CV_WINDOW_NORMAL);
-  cv::imshow("Debug Image", outputImg);
-  cv::waitKey(1);
-#endif
+  // finish the bounding box building step
+  if(!cPts.empty()) {
+    auto rect = cv::minAreaRect(cPts);
+    cv::Point2f vertices2f[4];
+    rect.points(vertices2f);
+    cv::Point2f a, b;
+
+    // use the long side as line
+    if(std::abs(vertices2f[0].x - vertices2f[1].x) > std::abs(vertices2f[1].x - vertices2f[2].x)) {
+      a = vertices2f[0];
+      b = vertices2f[1];
+    } else {
+      a = vertices2f[1];
+      b = vertices2f[2];
+    }
+    // ensures the right order of the points in newMidLinePts vector
+    if(a.x > b.x) {
+      newMidLinePts.push_back(b);
+      newMidLinePts.push_back(a);
+    } else {
+      newMidLinePts.push_back(a);
+      newMidLinePts.push_back(b);
+    }
+  }
+
+  // build the middle line from out points
+  // extend the last line to the front
+  auto wPt1 = newMidLinePts.at(newMidLinePts.size() - 2);
+  auto wPt2 = newMidLinePts.at(newMidLinePts.size() - 1);
+  auto dir = wPt2 - wPt1;
+  auto dirLen = sqrt(dir.x * dir.x + dir.y * dir.y);
+
+  auto newPt = wPt2 + (dir * (0.6 / dirLen));
+  if(newPt.x < maxViewRange_)
+    newMidLinePts.push_back(newPt);
+
+  // extend first line to the back
+  wPt1 = newMidLinePts.at(0);
+  wPt2 = newMidLinePts.at(1);
+  dir = wPt2 - wPt1;
+  dirLen = sqrt(dir.x * dir.x + dir.y * dir.y);
+  auto distToImageBoundary = wPt1.x - 0.24; // 0.24 is known. todo: magic numbers are not nice, put it in config
+  if(distToImageBoundary > 0.1) { // distance is positive
+    // dir, distToImageBoundary, dirLen are all positive
+    newPt = wPt1 - (dir * distToImageBoundary / dirLen);
+    newMidLinePts.push_back(newPt);
+  }
+
+  // sort the world points based on the distance to the car
+  std::sort(newMidLinePts.begin(), newMidLinePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; });
+
+  // convert points
+  imagePoints.clear();
+  image_operator_.worldToImage(newMidLinePts, imagePoints);
+  // create new guess
+  currentLane_.clear();
+  for(size_t i = 1; i < imagePoints.size(); i++) {
+    auto a = imagePoints.at(i - 1);
+    auto b = imagePoints.at(i);
+    // this makes the line coordinates inconsistant, but this should not be a serious problem
+    if(a.y > imgHeight)
+      a.y = imgHeight - 1;
+    if(b.y > imgHeight)
+      b.y = imgHeight - 1;
+
+    currentLane_.push_back(Line(a, b, newMidLinePts.at(i - 1), newMidLinePts.at(i)));
+  }
+
+  // validate our new guess
+  if(!currentLane_.empty()) {
+    if(currentLane_.at(currentLane_.size() - 1).wP2_.x < 0.5) {
+      // our guess is too short, it is better to use the default one
+      currentLane_.clear();
+    } else if((currentLane_.at(0).getAngle() < 1.0) || (currentLane_.at(0).getAngle() > 2.6)) {
+      // the angle of the first segment is weird (probably a workaround for now, why can this happen?)
+      // if we have more than one segment, then we just delete the first
+      if(currentLane_.size() > 1) {
+        currentLane_.erase(currentLane_.begin());
+      } else {
+        currentLane_.clear();
+      }
+    }
+
+    // angles between two connected segments should be plausible
+    bool done = false;
+    for(size_t i = 1; i < currentLane_.size() && !done; i++) {
+      if(std::abs(currentLane_.at(i - 1).getAngle() - currentLane_.at(i).getAngle()) > 0.8) {
+        // 0.8 = 45 degree
+        // todo: clear whole line or just to this segment?
+        currentLane_.erase(currentLane_.begin() + i, currentLane_.end());
+        ROS_INFO_STREAM("clipped line because of angle difference");
+        done = true;
+      } else if(currentLane_.at(i).wP2_.x > maxViewRange_) {
+        ROS_INFO_STREAM("clipped line because of maxViewRange_");
+        currentLane_.erase(currentLane_.begin() + i, currentLane_.end());
+        done = true;
+      } else if(currentLane_.at(i).getLength() > 0.7) {
+        ROS_INFO_STREAM("clipped line because of length");
+        currentLane_.erase(currentLane_.begin() + i, currentLane_.end());
+        done = true;
+      }
+    }
+    // draw the new (validated) guess
+    for(auto l : currentLane_) {
+      cv::line(outputImg, l.iP1_, l.iP2_, cv::Scalar(255,0,255), 2, cv::LINE_AA);
+      cv::circle(outputImg, l.iP1_, 5, cv::Scalar(255,0,255), 2);
+      cv::circle(outputImg, l.iP2_, 5, cv::Scalar(255,0,255), 2);
+    }
+  }
+
+  // todo: move old guess with odometry and compare old and new guess
+
+  debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, outputImg).toImageMsg());
+
+  // todo: publish points to road topic
 }
 
 ///
@@ -244,6 +372,9 @@ void LineDetection::findLane() {
 void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level){
   image_operator_.setConfig(config);
   lineWidth_ = config.lineWidth;
+  lineAngle_ = config.lineAngle;
+  lineVar_ = config.lineVar;
+  maxViewRange_ = config.maxSenseRange;
   cannyThreshold_ = config.cannyThreshold;
   houghThresold_ = config.houghThreshold;
   houghMinLineLen_ = config.houghMinLineLen;
