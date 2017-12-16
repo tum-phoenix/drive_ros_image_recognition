@@ -2,7 +2,7 @@
     <arg name="incoming_image" default="/camera/image_raw"/>
     <arg name="camera_info" default="/camera/camera_info"/>
     <arg name="homography_topic" default="/camera/camera_homog"/>
-    <arg name="debug" default="true"/>
+    <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
 

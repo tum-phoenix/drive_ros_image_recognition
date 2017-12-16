@@ -11,6 +11,7 @@
 #include <drive_ros_image_recognition/common_image_operations.h>
 #include <drive_ros_image_recognition/LineDetectionConfig.h>
 #include <nodelet/nodelet.h>
+#include <tf/transform_listener.h>
 #include "drive_ros_msgs/RoadLane.h"
 #include "line.h"
 
@@ -34,7 +35,8 @@ private:
 
   // variables
   CvImagePtr currentImage_;
-  std::vector<Line> currentLane_;
+  std::vector<Line> currentGuess_;
+  std::vector<Line> currentMiddleLine_;
   ImageOperator image_operator_;
 
   // communication
@@ -42,7 +44,9 @@ private:
   image_transport::Subscriber imageSubscriber_;
   ros::Publisher line_output_pub_; // note: not used yet
   ros::Subscriber homography_params_sub_;
+#ifdef PUBLISH_DEBUG
   image_transport::Publisher debugImgPub_;
+#endif
 
   // homography components
   cv::Mat world2cam_;
@@ -52,6 +56,10 @@ private:
   cv::Size transformed_size_;
   bool homog_received_;
 
+  // odometry components
+  tf::TransformListener tfListener_;
+  cv::Point2f oldPoint_;
+
   // callbacks
   void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
   void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
@@ -60,6 +68,12 @@ private:
 
   // methods
   void findLane();
+
+  float getDistanceBetweenPoints(const cv::Point2f a, const cv::Point2f b) {
+    auto dX = a.x - b.x;
+    auto dY = a.y - b.y;
+    return sqrt(dX * dX + dY * dY);
+  }
 
 public:
   LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);

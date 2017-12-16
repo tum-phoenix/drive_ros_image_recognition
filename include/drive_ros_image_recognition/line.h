@@ -1,6 +1,8 @@
 #ifndef LINE_H
 #define LINE_H
 
+namespace drive_ros_image_recognition {
+
 ///
 /// \brief The StreetLine class
 /// Represents a line, defined by two points.
@@ -16,10 +18,6 @@ public:
   cv::Point2f wP1_, wP2_, wMid_;
 
   Line(cv::Point iP1, cv::Point iP2, cv::Point2f wP1, cv::Point2f wP2)
-//    : iP1_(iP1)
-//    , iP2_(iP2)
-//    , wP1_(wP1)
-//    , wP2_(wP2)
   {
     if(wP1.x < wP2.x) {
       iP1_ = iP1;
@@ -41,16 +39,12 @@ public:
   inline double getAngle() { return std::abs(atan2(wP1_.x - wP2_.x, wP1_.y - wP2_.y)); }
 
   float getLength() {
+//    return getDistanceBetweenPoints(wP2_, wP1_);
     auto xDir = wP2_.x - wP1_.x;
     auto yDir = wP2_.y - wP1_.y;
     return sqrt(xDir * xDir + yDir * yDir);
   }
 };
-
-inline float getDistance(const cv::Point2f a, const cv::Point2f b) {
-  auto dX = a.x - b.x;
-  auto dY = a.y - b.y;
-  return sqrt(dX * dX + dY * dY);
-}
+} // namespace drive_ros_image_recognition
 
 #endif // LINE_H
