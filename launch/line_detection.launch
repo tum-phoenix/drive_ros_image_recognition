@@ -6,11 +6,14 @@
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
 
+    <!-- forward output to [screen|log] -->
+    <arg name="output" default="screen"/>
+
     <arg if="$(arg debug)" name="launch-prefix" value="gdb -ex run --args"/>
     <arg unless="$(arg debug)" name="launch-prefix" value=""/>
 
     <group unless="$(arg use_nodelet)">
-        <node name="line_detection" pkg="drive_ros_image_recognition" type="line_detection_node" respawn="false" output="screen" launch-prefix="$(arg launch-prefix)">
+        <node name="line_detection" pkg="drive_ros_image_recognition" type="line_detection_node" respawn="false" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
@@ -22,8 +25,8 @@
         <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="street_crossing_nodelet_manager"/>
         <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
 
-        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="street_crossing_nodelet_manager"  args="manager" output="screen"/>
-        <node pkg="nodelet" type="nodelet" name="street_crossing_detection_nodelet" args="load drive_ros_image_recognition/StreetCrossingDetectionNodelet $(arg manager_used)" output="screen" launch-prefix="$(arg launch-prefix)">
+        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="street_crossing_nodelet_manager"  args="manager" output="$(arg output)"/>
+        <node pkg="nodelet" type="nodelet" name="street_crossing_detection_nodelet" args="load drive_ros_image_recognition/StreetCrossingDetectionNodelet $(arg manager_used)" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
             <remap from="~/img_in" to="$(arg incoming_image)"/>
         </node>
     </group>
