@@ -88,7 +88,10 @@ bool RoadDetection::init() {
   }
 
   image_operator_ = ImageOperator();
-  image_operator_.init();
+  if (!image_operator_.init()) {
+    ROS_ERROR("Failed to initialize ImageOperator, shutting down!");
+    return false;
+  }
 
   std::string world_frame("/rear_axis_middle");
   if (!pnh_.getParam("world_frame", world_frame)) {
@@ -142,7 +145,6 @@ bool RoadDetection::init() {
 ////                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
 
   line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
-//  ROS_INFO("COMPLETED");
 
 #ifdef PUBLISH_DEBUG
   debug_img_pub_ = it_.advertise("debug_image_out", 10);
@@ -223,6 +225,15 @@ void RoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
 //  tf::Transform temp_transform;
 //  tf_listener_.lookupTransform("/odom", image_operator_.getWorldFrame(), road_in->points.front().header.stamp, temp_transform);
 //  point_transform = last_received_transform_.inverseTimes(temp_transform);
+  try
+  {
+    current_image_ = convertImageMessage(img_in);
+  }
+  catch (cv_bridge::Exception& e)
+  {
+    ROS_ERROR("cv_bridge exception: %s", e.what());
+    return;
+  }
 
   // maybe tf is smart enough to use based on the stamps and do this
   std::vector<geometry_msgs::PointStamped> moved_points;
@@ -309,20 +320,6 @@ void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const
 }
 
 bool RoadDetection::find(){
-//  // just to test if shit is valid:
-//  ROS_INFO_STREAM("Initial point: "<<road_points_buffer_[1]);
-//  geometry_msgs::PointStamped test_point;
-//  image_operator_.transformPointToImageFrame(road_points_buffer_[1],test_point);
-//  ROS_INFO_STREAM("Transformed to image frame: "<<test_point);
-//  cv::Point3d to_point(test_bpoint.point.x,test_point.point.y,test_point.point.z);
-//  cv::Point image_point;
-//  image_operator_.worldToImage(to_point, image_point);
-//  ROS_INFO_STREAM("Image point: "<<image_point);
-//  cv::Point2f back_to_world;
-//  image_operator_.imageToWorld(image_point,back_to_world);
-//  ROS_INFO_STREAM("Back in world: "<<back_to_world);
-//  return true;
-
   //clear old lines
   ROS_INFO("Creating new lines");
   lines_.clear();
@@ -423,6 +420,8 @@ bool RoadDetection::find(){
         }
       }
     }
+    // correctly order line points
+//    fixeLineOrdering(l, search_direction::y);
     lines_.push_back(l);
   }
 
@@ -434,21 +433,6 @@ bool RoadDetection::find(){
 }
 
 geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l) {
-//  std::vector<int> xv;
-//  std::vector<int> yv;
-
-  //calculate the offset
-  // done in search function
-//  float iDist = cv::norm(l.iEnd - l.iStart);
-//  float wDist = cv::norm(l.wEnd - l.wStart);
-  // add search offset -> do not need this as we do it directly in the image
-//  float pxlPerDist = iDist/wDist*searchOffset_;
-//  cv::Point2f iDiff = (l.i_start-l.i_end)/norm(l.i_start-l.i_end);
-//  cv::Point2f startLine = cv::Point2f(l.i_start)+iDiff*pxlPerDist;
-//  cv::Point2f endLine = cv::Point2f(l.i_end)-iDiff*pxlPerDist;
-  //    //get all points in between
-  //    lms::math::bresenhamLine(startLine.x,startLine.y,endLine.x,endLine.y,xv,yv); //wir suchen von links nach rechts!
-
   std::vector<cv::Point2f> foundPoints;
 
   // draw search line points in image
@@ -475,28 +459,6 @@ geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l
   if (foundPoints.size() != 0)
     ROS_INFO_STREAM("Found "<<foundPoints.size()<<" points in image!");
 
-//  bool crossing_found;
-//  if (foundPoints.size() > 6)
-//    crossing_found = true;
-
-  // draw unfiltered image points
-//#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-//    cv::namedWindow("Unfiltered points", CV_WINDOW_NORMAL);
-//    cv::Mat found_points_mat = current_image_->clone();
-//    for (auto point : foundPoints) {
-//      cv::circle(found_points_mat, point, 2, cv::Scalar(255));
-//    }
-//    // draw search line
-//    cv::line(found_points_mat, l.iStart, l.iEnd, cv::Scalar(255));
-//#ifdef DRAW_DEBUG
-//    cv::imshow("Unfiltered points", found_points_mat);
-//    cv::waitKey(1);
-//#endif
-
-//#ifdef PUBLISH_DEBUG
-//    detected_points_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, found_points_mat).toImageMsg());
-//#endif
-//#endif
   cv::waitKey(1);
 
   //filter

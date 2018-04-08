@@ -15,7 +15,7 @@ typedef boost::geometry::model::segment<point_xy> segment_hc;
 
 namespace drive_ros_geometry_common {
 
-const trans::rotate_transformer<boost::geometry::degree, double, 2, 2> rotate(90.0);
+const trans::rotate_transformer<boost::geometry::degree, double, 2, 2> orthogonal_transformer(90.0);
 
 template<typename Segment>
 struct lengthHelper{
@@ -25,8 +25,11 @@ struct lengthHelper{
       double length = boost::geometry::distance(s.first, s.second);
       if(length > 0){
           // normalize
-          trans::scale_transformer<double, 2, 2> scale(length_/length);
-          boost::geometry::transform(s, s, scale);
+        trans::scale_transformer<double, 2, 2> scale(length_/length);
+        boost::geometry::transform(s, s, scale);
+//          trans::translate_transformer<double, 2, 2> trans((bg::get<0>(s.second)-bg::get<0>(s.first))*(length_/length),
+//                                                           (bg::get<1>(s.second)-bg::get<1>(s.first))*(length_/length));
+//          boost::geometry::transform(s.second, s.second, trans);
       }
     }
 
@@ -62,7 +65,7 @@ struct orthogonalHelper{
       if(length > 0){
           // offset 90 degrees
           segment_hc rot;
-          boost::geometry::transform(s, rot, rotate);
+          boost::geometry::transform(s, rot, orthogonal_transformer);
 
           // normalize
           trans::scale_transformer<double, 2, 2> scale(distance_/length);
@@ -75,6 +78,18 @@ struct orthogonalHelper{
     }
 
     double distance_;
+};
+
+template<typename Segment>
+struct rotationalHelper{
+    rotationalHelper(double angle) : angle_(angle){}
+
+    inline void operator()(Segment &s){
+      trans::rotate_transformer<boost::geometry::degree, double, 2, 2> rot_trans(angle_);
+      boost::geometry::transform(s, s, rot_trans);
+    }
+
+    double angle_;
 };
 
 
@@ -94,6 +109,12 @@ inline void moveVertical(const linestring &lines_in, linestring& lines_out, doub
 
 inline void rescaleLength (linestring &lines_in, double length) {
   lengthHelper<segment> helper(length);
+  bg::for_each_segment(lines_in, helper);
+  return ;
+}
+
+inline void rotate (linestring &lines_in, double angle) {
+  rotationalHelper<segment> helper(angle);
   bg::for_each_segment(lines_in, helper);
   return ;
 }

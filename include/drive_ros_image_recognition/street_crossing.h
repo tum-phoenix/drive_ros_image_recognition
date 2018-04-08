@@ -38,7 +38,9 @@ private:
     std::unique_ptr<message_filters::Subscriber<drive_ros_msgs::RoadLane> > road_sub_;
     typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, drive_ros_msgs::RoadLane> SyncImageToHints;
     std::unique_ptr<message_filters::Synchronizer<SyncImageToHints> > sync_;
+    image_transport::Subscriber img_sub_standalone;
     void syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in);
+    void imageCallback(const sensor_msgs::ImageConstPtr& img_in);
 
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;

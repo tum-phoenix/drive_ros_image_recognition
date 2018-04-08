@@ -39,6 +39,10 @@ inline CvImagePtr convertImageMessage(const sensor_msgs::ImageConstPtr& img_in) 
 
 namespace drive_ros_image_recognition {
 
+inline cv::Point absPoint(cv::Point point_in) {
+  return cv::Point(std::abs(point_in.x),std::abs(point_in.y));
+}
+
 inline void geometrypointsToLinestring(const std::vector<geometry_msgs::PointStamped>& geometry_points, linestring& line_out) {
   for (const geometry_msgs::PointStamped& point_stamped : geometry_points) {
     boost::geometry::append(line_out,point_xy(point_stamped.point.x, point_stamped.point.y));
@@ -107,6 +111,24 @@ struct SearchLine{
   cv::Point2f wMid;
   cv::Point2f wRight;
 };
+
+inline void fixedLineOrdering(SearchLine& line, search_direction dir) {
+  if (dir == search_direction::x) {
+    if (line.iStart.x > line.iEnd.x) {
+      ROS_INFO_STREAM("Flipping X for "<<line.iStart<<" and "<<line.iEnd);
+      cv::Point temp = line.iStart;
+      line.iStart = line.iEnd;
+      line.iEnd = temp;
+    }
+  } else {
+    if (line.iStart.y > line.iEnd.y) {
+      ROS_INFO_STREAM("Flipping Y for "<<line.iStart<<" and "<<line.iEnd);
+      cv::Point temp = line.iStart;
+      line.iStart = line.iEnd;
+      line.iEnd = temp;
+    }
+  }
+}
 
 class TransformHelper {
 
@@ -230,6 +252,7 @@ public:
                                                                                        std::ref(cam2world_), std::ref(world2cam_),
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
                                                                                        std::ref(homography_received_)));
+    return true;
   }
 
   void setCamModel(const image_geometry::PinholeCameraModel& cam_model) {
@@ -237,7 +260,6 @@ public:
   }
 
   void setWorldFrame(const std::string& frame) {
-    ROS_ERROR_STREAM("SETTING WORLD FRAME TO: "<<frame);
     if (camera_frame_ != std::string("")) {
       try {
         ros::Duration timeout(1.0);
@@ -390,6 +412,7 @@ public:
   }
 
   void linestringToImageFrame(const linestring& linestring, std::vector<cv::Point3d>& image_frame_points, const std::string& frame_id) {
+    image_frame_points.clear();
     geometry_msgs::PointStamped moved_point, moved_point_camera;
     moved_point.header.frame_id = frame_id;
     for (auto it = linestring.begin(); it != linestring.end(); ++it) {
@@ -416,8 +439,9 @@ public:
 
   bool imageToWorld(const cv::Point& image_point, point_xy& world_point, const std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
     cv::Point2f world_point_cv;
-    imageToWorld(image_point, world_point_cv, target_frame, test_image);
+    bool retval = imageToWorld(image_point, world_point_cv, target_frame, test_image);
     world_point = point_xy(world_point_cv.x, world_point_cv.y);
+    return retval;
   }
 
   void setcam2worldMat(const cv::Mat& cam2world) {
@@ -550,10 +574,32 @@ public:
   {
     cv::Mat processed_image;
     // step 0: cut image to line
-    processed_image = current_image(cv::Rect(sl.iStart,
-                                             cv::Point(sl.iEnd.x+(search_dir==search_direction::y),
-                                                       sl.iEnd.y+(search_dir==search_direction::x))
-                                             ));
+    ROS_INFO_STREAM("Trying to find ROI from: "<<sl.iStart<<" to: "<<sl.iEnd);
+    int x_start = std::min(sl.iStart.x, sl.iEnd.x);
+    int y_start = std::min(sl.iStart.y, sl.iEnd.y);
+    int x_end = std::max(sl.iStart.x, sl.iEnd.x);
+    int y_end = std::max(sl.iStart.y, sl.iEnd.y);
+    bool x_increased = false, y_increased = false;
+//    if (x_start == x_end) {
+//      x_increased = true;
+//      x_end+=1;
+//    }
+//    if (y_start == y_end) {
+//      y_increased = true;
+//      y_end+=1;
+//    }
+    x_end+=1;
+    y_end+=1;
+    ROS_INFO("xstart %i, ystart %i, xend %i, yend %i, search_dir %i",x_start,y_start,x_end,y_end,search_dir);
+//    processed_image = current_image(cv::Rect(sl.iStart,
+//                                             cv::Point(sl.iEnd.x+(search_dir==search_direction::y),
+//                                                       sl.iEnd.y+(search_dir==search_direction::x))
+//                                             ));
+//    processed_image = current_image(cv::Rect(cv::Point(x_start, y_start), cv::Point(x_end+(search_dir==search_direction::y),
+//                                                                                    y_end+(search_dir==search_direction::x))
+//                                             ));
+//    processed_image = current_image(cv::Rect(cv::Point(x_start, y_start), cv::Point(x_end, y_end)));
+    processed_image = current_image(cv::Rect(x_start, y_start, x_end-x_start, y_end-y_start));
 
     // step 1: threshold image with mat:
     if (search_meth == search_method::brightness) {
@@ -636,7 +682,15 @@ public:
       bool lowhigh_found = false;
       int first = 0;
       cv::Point first_pos;
-      cv::LineIterator it(processed_image, cv::Point(0,0), sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1));
+//      ROS_INFO_STREAM("SL Start at: "<<sl.iStart<<" end at: "<<sl.iEnd);
+//      ROS_INFO_STREAM("Line endpoint without abs at: "<<sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1)
+//                      <<" with abs: "<<absPoint(sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1)));
+//      cv::LineIterator it(processed_image, cv::Point(0,0), /*absPoint(*/sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1)/*)*/);
+
+      cv::Point start_point = cv::Point(0,0);
+      cv::Point end_point = cv::Point(x_end-x_start-(int)x_increased,y_end-y_start-(int)y_increased);
+      cv::LineIterator it(processed_image, start_point,end_point);
+      ROS_INFO_STREAM("Created iterator from "<<start_point<<" to "<<end_point<<" count: "<<it.count<<" image size: "<<processed_image.size<<" y increased"<<y_increased<<" x increased "<<x_increased);
       // the same search line can find multiple line segments
       for(int i=0; i<it.count; ++i, ++it)
       {
@@ -649,18 +703,18 @@ public:
           line_widths.push_back(i-first);
           // we are not actually using search directions only but all directions
           // todo: make dynamic kernel based on direction
-          if (search_dir == search_direction::x) {
-            image_points.push_back((it.pos()+first_pos)/2+first_pos+sl.iStart);
-          }
-          else if (search_dir == search_direction::y) {
+//          if (search_dir == search_direction::x) {
+//            image_points.push_back((it.pos()+first_pos)/2+first_pos+sl.iStart);
+//          }
+//          else if (search_dir == search_direction::y) {
 //            ROS_INFO_STREAM("MEAN POINT OF: "<<it.pos()<<" and first: "<<first_pos<<" is: "<<cv::Point((it.pos()+first_pos)/2));
-            image_points.push_back(cv::Point((it.pos()+first_pos)/2+sl.iStart));
-          }
+//          image_points.push_back(cv::Point((it.pos()+start_point)/*/2*/+cv::Point(x_start,y_start)));
+          image_points.push_back(cv::Point((it.pos()+first_pos)/2+cv::Point(x_start,y_start)));
+//          }
           lowhigh_found = false;
         }
       }
     }
-
     return;
   }
 

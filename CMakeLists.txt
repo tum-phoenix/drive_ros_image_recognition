@@ -195,6 +195,51 @@ install(TARGETS street_crossing_node
     )
 
 ################################################################################
+# Crosswalk detection nodelet
+################################################################################
+
+add_library(crosswalk_detection_nodelet
+    src/crosswalk_detection.cpp
+    )
+
+add_dependencies(crosswalk_detection_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(crosswalk_detection_nodelet
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+    )
+
+install(TARGETS crosswalk_detection_nodelet
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
+# Crosswalk detection node
+################################################################################
+
+add_executable(crosswalk_detection_node
+    src/crosswalk_detection.cpp
+    src/crosswalk_detection_node.cpp
+    )
+
+add_dependencies(crosswalk_detection_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(crosswalk_detection_node
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+    )
+
+install(TARGETS crosswalk_detection_node
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
 # Road publisher node (LMS port)
 ################################################################################
 
