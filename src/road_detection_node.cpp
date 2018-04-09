@@ -11,7 +11,8 @@ int main(int argc, char** argv)
   ros::Duration(2.0).sleep();
 #endif
 
-  drive_ros_image_recognition::RoadDetection road_detection(nh,pnh);
+  image_transport::ImageTransport* it = new image_transport::ImageTransport(pnh);
+  drive_ros_image_recognition::RoadDetection road_detection(nh,pnh,it);
   if (!road_detection.init()) {
     return 1;
   }

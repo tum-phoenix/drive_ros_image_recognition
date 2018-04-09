@@ -34,9 +34,10 @@
         <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
 
         <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="road_detection_nodelet_manager"  args="manager" output="screen"/>
-        <node pkg="nodelet" type="nodelet" name="road_detection_nodelet" args="load drive_ros_image_recognition/RoadDetectionNodelet $(arg manager_used)" output="screen" launch-prefix="$(arg launch-prefix)">
+        <node pkg="nodelet" type="nodelet" name="road_detection_nodelet" args="load drive_ros_image_recognition/RoadDetection $(arg manager_used)" output="screen" launch-prefix="$(arg launch-prefix)">
             <remap from="img_in" to="$(arg incoming_image)"/>
             <remap from="road_in" to="$(arg road_trajectory_topic)"/>
+            <remap from="camera_info" to="$(arg camera_info)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
             <remap from="line_out" to="$(arg visual_detection_topic)"/>
             <param name="world_frame" type="str" value="$(arg world_frame)"/>

@@ -9,7 +9,7 @@
 
 <!-- road_detection nodelet -->
 <library path="lib/libroad_detection_nodelet">
-  <class name="drive_ros_image_recognition/RoadDetectionNodelet" type="drive_ros_image_recognition::RoadDetectionNodelet" base_class_type="nodelet::Nodelet">
+  <class name="drive_ros_image_recognition/RoadDetection" type="drive_ros_image_recognition::RoadDetection" base_class_type="nodelet::Nodelet">
   <description>
   Image warper nodelet.
   </description>
@@ -18,7 +18,7 @@
 
 <!-- crossing_detection nodelet -->
 <library path="lib/libstreet_crossing_nodelet">
-  <class name="drive_ros_image_recognition/StreetCrossingDetectionNodelet" type="drive_ros_image_recognition::StreetCrossingDetectionNodelet" base_class_type="nodelet::Nodelet">
+  <class name="drive_ros_image_recognition/StreetCrossingDetection" type="drive_ros_image_recognition::StreetCrossingDetection" base_class_type="nodelet::Nodelet">
   <description>
   Street crossing detection nodelet.
   </description>
@@ -27,7 +27,7 @@
 
 <!-- road_detection nodelet -->
 <library path="lib/libcrosswalk_detection_nodelet">
-  <class name="drive_ros_image_recognition/CrosswalkDetectionNodelet" type="drive_ros_image_recognition::CrosswalkDetectionNodelet" base_class_type="nodelet::Nodelet">
+  <class name="drive_ros_image_recognition/CrosswalkDetection" type="drive_ros_image_recognition::CrosswalkDetection" base_class_type="nodelet::Nodelet">
   <description>
   Croswall detection nodelet.
   </description>

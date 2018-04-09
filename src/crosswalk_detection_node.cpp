@@ -11,7 +11,7 @@ int main(int argc, char** argv)
   ros::Duration(2.0).sleep();
 #endif
 
-  drive_ros_image_recognition::CrosswalkDetection crosswalk_detection(nh,pnh);
+  drive_ros_image_recognition::CrosswalkDetection crosswalk_detection(nh,pnh,new image_transport::ImageTransport(pnh));
   if (!crosswalk_detection.init()) {
     return 1;
   }

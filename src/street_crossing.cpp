@@ -7,61 +7,30 @@
 
 namespace drive_ros_image_recognition {
 
-StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh)
-  : nh_(nh)
-  , pnh_(pnh)
-  , imageTransport_(pnh)
-  , image_operator_()
-  , dsrv_server_()
-  , config_()
-  , road_hints_buffer_()
-  , img_sub_()
-  , road_sub_()
-  , sync_()
-  #if defined (DRAW_DEBUG) || defined (PUBLISH_DEBUG)
-  , debugImage(0, 0, CV_8UC1)
-  #endif
+StreetCrossingDetection::StreetCrossingDetection()
+  : Detection(ros::NodeHandle(), ros::NodeHandle("~"), nullptr)
+{
+}
+
+StreetCrossingDetection::StreetCrossingDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh, image_transport::ImageTransport* it)
+  : Detection(nh, pnh, it)
 {
 }
 
 StreetCrossingDetection::~StreetCrossingDetection() {
 }
 
-bool StreetCrossingDetection::init() {
-  dsrv_server_.setCallback(boost::bind(&StreetCrossingDetection::reconfigureCB, this, _1, _2));
+void StreetCrossingDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
+  current_image_ = convertImageMessage(img_in);
 
-  image_operator_ = ImageOperator();
-  if (!image_operator_.init()) {
-    ROS_ERROR("[crossing detection] Failed to initialize ImageOperator, shutting down!");
-    return false;
-  }
-
-#ifdef PUBLISH_DEBUG
-  debugImagePublisher = imageTransport_.advertise("/street_crossing/debug_image", 10);
-#endif
-
-  // register correct subscriber
-//  img_sub_.reset(new image_transport::SubscriberFilter(imageTransport_,"/warped_image", 5));
-//  road_sub_.reset(new message_filters::Subscriber<drive_ros_msgs::RoadLane>(pnh_,"/road_detection/road_in", 5));
-//  sync_.reset(new message_filters::Synchronizer<SyncImageToHints>(SyncImageToHints(5), *img_sub_, *road_sub_));
-//  sync_->registerCallback(boost::bind(&StreetCrossingDetection::syncCallback, this, _1, _2));
-
-  std::string world_frame("/rear_axis_middle");
-  if (!pnh_.getParam("world_frame", world_frame)) {
-    ROS_WARN_STREAM("[crossing detection] Unable to load 'useWeights' parameter, using default: "<<world_frame);
-  }
-  image_operator_.setWorldFrame(world_frame);
-
-  // temporary solution until we set the correct frame
-  std::string camera_frame("/camera_optical");
-  if (!pnh_.getParam("camera_frame", camera_frame)) {
-    ROS_WARN_STREAM("[crossing detection] Unable to load 'camera_frame' parameter, using default: "<<camera_frame);
-  }
-  image_operator_.setCameraFrame(camera_frame);
+  // crop image by 64 from all directions
+  int rect_offset = 64;
+  image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
 
   // fill initial line hints -> points offset 5cm in the y direction
+  road_hints_buffer_.clear();
   geometry_msgs::PointStamped temp_point;
-  temp_point.header.frame_id = world_frame;
+  temp_point.header.frame_id = image_operator_.getWorldFrame();
   temp_point.point.x = 0.1;
   temp_point.point.y = 0;
   temp_point.point.z = 0;
@@ -70,24 +39,6 @@ bool StreetCrossingDetection::init() {
   road_hints_buffer_.push_back(temp_point);
   temp_point.point.x = 0.3;
   road_hints_buffer_.push_back(temp_point);
-
-  img_sub_standalone = imageTransport_.subscribe("/warped_image", 1000, &StreetCrossingDetection::imageCallback, this);
-
-  return true;
-}
-
-void StreetCrossingDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in) {
-  currentImage_ = convertImageMessage(img_in);
-  road_hints_buffer_ = road_in->points;
-  find();
-}
-
-void StreetCrossingDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
-  currentImage_ = convertImageMessage(img_in);
-
-  // crop image by 64 from all directions
-  int rect_offset = 64;
-  image_operator_.setImageRect(cv::Rect(0, rect_offset, currentImage_->cols, currentImage_->rows-rect_offset));
 
   // since we are handling hints internally we cannot have no hints at all
   find();
@@ -106,39 +57,6 @@ void StreetCrossingDetection::imageCallback(const sensor_msgs::ImageConstPtr& im
 }
 
 bool StreetCrossingDetection::find() {
-  //  std::vector<cv::Point2f> linePoints;
-  //  SearchLine mySl;
-
-  //  // use search-line to find stop-line
-  //  mySl.iStart = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .4);
-  //  mySl.iEnd = cv::Point2f(currentImage_->cols / 2, currentImage_->rows * .8);
-
-  //  // find line using unified header
-  //  search_direction search_dir = search_direction::y;
-  //  search_method search_meth = search_method::sobel;
-  //  std::vector<cv::Point> image_points;
-  //  std::vector<int> line_widths;
-  //  image_operator_.findByLineSearch(mySl,*currentImage_,search_dir,search_meth,image_points,line_widths);
-  //#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
-  //  cv::Mat debug_image;
-  //  cv::cvtColor(*currentImage_, debug_image, CV_GRAY2RGB);
-  //  cv::line(debug_image, mySl.iStart, mySl.iEnd, cv::Scalar(255,255,255));
-  //  for (auto point: image_points) {
-  //    cv::circle(debug_image,point,2,cv::Scalar(0,255,0),2);
-  //  }
-  //#endif
-  //#ifdef DRAW_DEBUG
-  //  cv::namedWindow("Crossing Search debug",CV_WINDOW_NORMAL);
-  //  cv::imshow("Crossing Search debug",debug_image);
-  //  cv::waitKey(1);
-  //#endif
-  //#ifdef PUBLISH_DEBUG
-  //  debugImagePublisher.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::TYPE_8UC1, debugImage).toImageMsg());
-  //#endif
-
-  // test array of lines
-  //  image_operator_.debugPointsImage(*currentImage, search_dir, search_meth);
-
   if (road_hints_buffer_.size() < 2) {
     ROS_ERROR("[crossing detection] Less than 2 points in buffer, skipping search.");
     return false;
@@ -171,7 +89,7 @@ bool StreetCrossingDetection::find() {
 
     fixedLineOrdering(mid_line, search_direction::x);
 
-    image_operator_.findByLineSearch(mid_line, *currentImage_, search_direction::x, search_method::sobel, image_points, line_widths);
+    image_operator_.findByLineSearch(mid_line, *current_image_, search_direction::x, search_method::sobel, image_points, line_widths);
 
     if (image_points.size() == 1) {
       ROS_INFO_STREAM("[crossing detection] Found vertical point at "<<image_points[0]);
@@ -180,7 +98,7 @@ bool StreetCrossingDetection::find() {
     // draw found points
 #if defined(DRAW_DEBUG)
     cv::namedWindow("Found points", CV_WINDOW_NORMAL);
-    cv::Mat filtered_points_mat = currentImage_->clone();
+    cv::Mat filtered_points_mat = current_image_->clone();
     cv::cvtColor(filtered_points_mat, filtered_points_mat, cv::COLOR_GRAY2BGR);
     cv::line(filtered_points_mat, mid_line.iStart, mid_line.iEnd, cv::Scalar(255,0,0), 1);
     for (auto point : image_points) {
@@ -223,13 +141,12 @@ bool StreetCrossingDetection::find() {
       right_searchline.iEnd = points_right[1];
 
       std::vector<cv::Point> detected_points_left, detected_points_right;
-      image_operator_.findByLineSearch(left_seachline, *currentImage_, search_direction::x, search_method::sobel, detected_points_left, line_widths);
-      image_operator_.findByLineSearch(right_searchline, *currentImage_, search_direction::x, search_method::sobel, detected_points_right, line_widths);
+      image_operator_.findByLineSearch(left_seachline, *current_image_, search_direction::x, search_method::sobel, detected_points_left, line_widths);
+      image_operator_.findByLineSearch(right_searchline, *current_image_, search_direction::x, search_method::sobel, detected_points_right, line_widths);
 
 #if defined(DRAW_DEBUG)
-      ROS_WARN("DRAWING CONFIRMATION POINTS");
       cv::namedWindow("Confirmation points", CV_WINDOW_NORMAL);
-      cv::Mat confirmation_points_mat = currentImage_->clone();
+      cv::Mat confirmation_points_mat = current_image_->clone();
       cv::cvtColor(confirmation_points_mat, confirmation_points_mat, cv::COLOR_GRAY2BGR);
       cv::line(confirmation_points_mat, mid_line.iStart, mid_line.iEnd, cv::Scalar(255,0,0), 1);
       cv::line(confirmation_points_mat, left_seachline.iStart, left_seachline.iEnd, cv::Scalar(0,255,0), 1);
@@ -249,7 +166,7 @@ bool StreetCrossingDetection::find() {
 
       if (points_right.size() != 1 && points_left.size() != 1){
         //no crossing, something else
-        ROS_WARN_STREAM("[crossing detection] Could not confirm crossing, found: "<<points_left.size()<<" left points and "<<points_right.size()<<" right points");
+        ROS_INFO_STREAM("[crossing detection] Could not confirm crossing, found: "<<points_left.size()<<" left points and "<<points_right.size()<<" right points");
       }
       if (points_right.size() == 0 && points_left.size() == 0)  {
         continue;
@@ -266,7 +183,7 @@ bool StreetCrossingDetection::find() {
       start_search_line.iEnd = points_start[1];
       points_start.clear();
 
-      image_operator_.findByLineSearch(start_search_line, *currentImage_, search_direction::x, search_method::sobel, points_start, line_widths);
+      image_operator_.findByLineSearch(start_search_line, *current_image_, search_direction::x, search_method::sobel, points_start, line_widths);
 
       if (points_start.size() == 1) {
         ROS_INFO_STREAM("[crossing detection] Found starting line!");
@@ -281,7 +198,7 @@ bool StreetCrossingDetection::find() {
         //              logger.debug("found startline");
         break;
       } else if (points_start.size() > 1) {
-        ROS_WARN_STREAM("[crossing detection] Invalid startline, too many points on the left");
+        ROS_INFO_STREAM("[crossing detection] Invalid startline, too many points on the left");
         continue;
       } else {
         ROS_INFO("[crossing detection] No points found in startline");
@@ -298,7 +215,7 @@ bool StreetCrossingDetection::find() {
       opposite_search_line.iStart = points_opposite[0];
       opposite_search_line.iEnd = points_opposite[1];
       points_opposite.clear();
-      image_operator_.findByLineSearch(opposite_search_line, *currentImage_, search_direction::x, search_method::sobel, points_opposite, line_widths);
+      image_operator_.findByLineSearch(opposite_search_line, *current_image_, search_direction::x, search_method::sobel, points_opposite, line_widths);
 
 #if defined(DRAW_DEBUG)
       cv::namedWindow("Confirmation points with startline and crossing", CV_WINDOW_NORMAL);
@@ -325,29 +242,13 @@ bool StreetCrossingDetection::find() {
         //              logger.debug("found crossing");
         break;
       } else {
-        ROS_WARN_STREAM("[crossing detection] Could not find opposite line, found "<<points_opposite.size()<<" points");
+        ROS_INFO_STREAM("[crossing detection] Could not find opposite line, found "<<points_opposite.size()<<" points");
       }
     }
   }
   return true;
 }
 
-void StreetCrossingDetection::reconfigureCB(drive_ros_image_recognition::CrossingDetectionConfig& config, uint32_t level){
-  config_ = config;
-}
-
-void StreetCrossingDetectionNodelet::onInit() {
-  street_crossing_detection_.reset(new StreetCrossingDetection(getNodeHandle(),getPrivateNodeHandle()));
-  if (!street_crossing_detection_->init()) {
-    ROS_ERROR("[crossing detection] StreetCrossing nodelet failed to initialize");
-    // nodelet failing will kill the entire loader anyway
-    ros::shutdown();
-  }
-  else {
-    ROS_INFO("[crossing detection] StreetCrossing detection nodelet succesfully initialized");
-  }
-}
-
 } // namespace drive_ros_image_recognition
 
-PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::StreetCrossingDetectionNodelet, nodelet::Nodelet)
+PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::StreetCrossingDetection, nodelet::Nodelet)

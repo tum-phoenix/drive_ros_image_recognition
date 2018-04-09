@@ -17,6 +17,7 @@ WarpContent::WarpContent(const ros::NodeHandle& nh, const ros::NodeHandle& pnh):
   homography_params_sub_(),
   cam2world_(3,3,CV_64FC1,cv::Scalar(0.0)),
   world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
+  scaling_mat_init_(3,3,CV_64FC1,cv::Scalar(0.0)),
   scaling_mat_(3,3,CV_64FC1,cv::Scalar(0.0)),
   scaling_mat_inv_(3,3,CV_64FC1,cv::Scalar(0.0)),
   transformed_size_(0,0),
@@ -47,16 +48,16 @@ bool WarpContent::init() {
   }
   ROS_ASSERT(image_size.size() == 2);
   transformed_size_ = cv::Size(image_size[0],image_size[1]);
-  scaling_mat_.at<double>(0,0) = world_size[0]/image_size[0];
-  scaling_mat_.at<double>(1,1) = -world_size[1]/image_size[1];
-  scaling_mat_.at<double>(1,2) = world_size[1]/2;
-  scaling_mat_.at<double>(2,2) = 1.0;
+  scaling_mat_init_.at<double>(0,0) = world_size[0]/image_size[0];
+  scaling_mat_init_.at<double>(1,1) = -world_size[1]/image_size[1];
+  scaling_mat_init_.at<double>(1,2) = world_size[1]/2;
+  scaling_mat_init_.at<double>(2,2) = 1.0;
   ROS_INFO_STREAM("Calculated world2mat scaling matrix: "<<scaling_mat_);
 
   homography_params_sub_ = nh_.subscribe<drive_ros_msgs::Homography>("homography_in", 1,
                                           boost::bind(homography_callback, _1,
                                                       std::ref(cam2world_), std::ref(world2cam_), std::ref(scaling_mat_),
-                                                      std::ref(scaling_mat_inv_), std::ref(homo_received_)));
+                                                      std::ref(scaling_mat_inv_), std::ref(homo_received_), std::ref(scaling_mat_init_)));
   // initialize combined subscriber for camera image and model
   cam_sub_ = it_.subscribeCamera("img_in", 10, &WarpContent::world_image_callback, this);
   return true;

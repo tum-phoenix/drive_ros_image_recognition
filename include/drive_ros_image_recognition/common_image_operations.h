@@ -50,7 +50,7 @@ inline void geometrypointsToLinestring(const std::vector<geometry_msgs::PointSta
 }
 
 inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_in, cv::Mat& cam2world, cv::Mat& world2cam,
-                                cv::Mat& scaling_mat, cv::Mat& scaling_mat_inv, bool& homography_received) {
+                                cv::Mat& scaling_mat, cv::Mat& scaling_mat_inv, bool& homography_received, cv::Mat& scaling_mat_init) {
   if (!homography_received)
     homography_received = true;
 
@@ -72,8 +72,7 @@ inline void homography_callback(const drive_ros_msgs::HomographyConstPtr& homo_i
     }
   }
 
-  ROS_INFO_STREAM("Scaling mat: "<<scaling_mat);
-  scaling_mat = world2cam*scaling_mat;
+  scaling_mat = world2cam*scaling_mat_init;
   scaling_mat_inv = scaling_mat.inv();
 }
 
@@ -115,14 +114,14 @@ struct SearchLine{
 inline void fixedLineOrdering(SearchLine& line, search_direction dir) {
   if (dir == search_direction::x) {
     if (line.iStart.x > line.iEnd.x) {
-      ROS_INFO_STREAM("Flipping X for "<<line.iStart<<" and "<<line.iEnd);
+      ROS_DEBUG_STREAM("[fixedLineOrdering] Flipping X for "<<line.iStart<<" and "<<line.iEnd);
       cv::Point temp = line.iStart;
       line.iStart = line.iEnd;
       line.iEnd = temp;
     }
   } else {
     if (line.iStart.y > line.iEnd.y) {
-      ROS_INFO_STREAM("Flipping Y for "<<line.iStart<<" and "<<line.iEnd);
+      ROS_DEBUG_STREAM("[fixedLineOrdering] Flipping Y for "<<line.iStart<<" and "<<line.iEnd);
       cv::Point temp = line.iStart;
       line.iStart = line.iEnd;
       line.iEnd = temp;
@@ -142,6 +141,7 @@ public:
     cam_info_sub_(),
     homography_received_(false),
     homography_sub_(),
+    scaling_mat_init_(3,3,CV_64FC1,cv::Scalar(0.0)),
     scaling_mat_(3,3,CV_64FC1,cv::Scalar(0.0)),
     scaling_mat_inv_(3,3,CV_64FC1,cv::Scalar(0.0)),
     transformed_size_(0,0),
@@ -164,6 +164,8 @@ public:
 
     std::swap(world2cam_, other.world2cam_);
     std::swap(cam2world_, other.cam2world_);
+    std::swap(scaling_mat_, other.scaling_mat_);
+    std::swap(scaling_mat_inv_, other.scaling_mat_inv_);
     // cannot swap subscriber, need to bind to new object
     cam_info_sub_ = ros::NodeHandle().subscribe<sensor_msgs::CameraInfo>("camera_info", 1,
                                                            boost::bind(&camInfo_callback, _1,
@@ -174,8 +176,7 @@ public:
                                                                            boost::bind(homography_callback, _1,
                                                                                        std::ref(cam2world_), std::ref(world2cam_),
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
-                                                                                       std::ref(homography_received_)));
-
+                                                                                       std::ref(homography_received_), std::ref(scaling_mat_init_)));
     other.cam_info_sub_.shutdown();
     other.homography_sub_.shutdown();
     return *this;
@@ -198,12 +199,13 @@ public:
                                                                            boost::bind(homography_callback, _1,
                                                                                        std::ref(cam2world_), std::ref(world2cam_),
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
-                                                                                       std::ref(homography_received_)));
+                                                                                       std::ref(homography_received_), std::ref(scaling_mat_init_)));
   }
 
   TransformHelper(const image_geometry::PinholeCameraModel& cam_model):
     cam2world_(3,3,CV_64FC1,cv::Scalar(0.0)),
     world2cam_(3,3,CV_64FC1,cv::Scalar(0.0)),
+    scaling_mat_init_(3,3,CV_64FC1,cv::Scalar(0.0)),
     scaling_mat_(3,3,CV_64FC1,cv::Scalar(0.0)),
     scaling_mat_inv_(3,3,CV_64FC1,cv::Scalar(0.0)),
     transformed_size_(0,0),
@@ -223,7 +225,10 @@ public:
   }
 
   bool init() {
-    ros::NodeHandle pnh = ros::NodeHandle("~");
+    init(ros::NodeHandle(), ros::NodeHandle("~"));
+  }
+
+  bool init(ros::NodeHandle nh, ros::NodeHandle pnh) {
     std::vector<double> world_size;
     if(!pnh.getParam("world_size", world_size)) {
        ROS_ERROR("Unable to load parameter world_size!");
@@ -232,26 +237,26 @@ public:
     ROS_ASSERT(world_size.size() == 2);
     std::vector<double> image_size;
     if(!pnh.getParam("image_size", image_size)) {
-      ROS_ERROR("Unable to load parameter world_size!");
+      ROS_ERROR("Unable to load parameter image_size!");
       return false;
     }
     ROS_ASSERT(image_size.size() == 2);
     transformed_size_ = cv::Size(image_size[0],image_size[1]);
-    scaling_mat_.at<double>(0,0) = world_size[0]/image_size[0];
-    scaling_mat_.at<double>(1,1) = -world_size[1]/image_size[1];
-    scaling_mat_.at<double>(1,2) = world_size[1]/2;
-    scaling_mat_.at<double>(2,2) = 1.0;
+    scaling_mat_init_.at<double>(0,0) = world_size[0]/image_size[0];
+    scaling_mat_init_.at<double>(1,1) = -world_size[1]/image_size[1];
+    scaling_mat_init_.at<double>(1,2) = world_size[1]/2;
+    scaling_mat_init_.at<double>(2,2) = 1.0;
 
     // subscribe Camera model to TransformHelper-> this is kind of hacky, but should keep the camera model on the transform helper updated
-    cam_info_sub_ = ros::NodeHandle().subscribe<sensor_msgs::CameraInfo>("camera_info", 1,
+    cam_info_sub_ = nh.subscribe<sensor_msgs::CameraInfo>("camera_info", 1,
                                                            boost::bind(&camInfo_callback, _1,
                                                                        std::ref(cam_model_),
                                                                        std::ref(camera_model_received_) ) );
-    homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
-                                                                           boost::bind(homography_callback, _1,
-                                                                                       std::ref(cam2world_), std::ref(world2cam_),
-                                                                                       std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
-                                                                                       std::ref(homography_received_)));
+    homography_sub_ = nh.subscribe<drive_ros_msgs::Homography>("homography_in", 1,
+                                                                boost::bind(homography_callback, _1,
+                                                                            std::ref(cam2world_), std::ref(world2cam_),
+                                                                            std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
+                                                                            std::ref(homography_received_), std::ref(scaling_mat_init_)));
     return true;
   }
 
@@ -349,7 +354,6 @@ public:
   }
 
   bool imageToWorld(const cv::Point& image_point, cv::Point2f& world_point, const std::string target_frame = std::string("/rear_axis_middle_ground"), cv::Mat test_image = cv::Mat()) {
-//    ROS_INFO_STREAM("Target frame: "<<target_frame);
     if(!homography_received_ || !camera_model_received_) {
       if (!homography_received_)
         ROS_WARN_STREAM("[ImageToWorld] Homography not received yet, skipping image to world transformation requested for image point "<<image_point<<" and returning world Point2f (0.0,0.0)");
@@ -393,8 +397,6 @@ public:
     tf::Vector3 plane_normal(0,0,1);
     tf::Vector3 plane_point(0,0,0);
     tf::pointMsgToTF(camera_point_world.point, ray_point_tf);
-//    ROS_INFO_STREAM("TRANSFORM ORIGIN x:"<<transform.getOrigin().x()<<" y: "<<transform.getOrigin().y()<<" z: "<<transform.getOrigin().z());
-//    ROS_INFO_STREAM("RAY_POINT: "<<camera_point_world.point);
     tf::Vector3 ray_dir = ray_point_tf - transform.getOrigin();
     double denom = plane_normal.dot(ray_dir);
 
@@ -478,6 +480,7 @@ private:
   std::string camera_frame_;
   cv::Mat cam2world_;
   cv::Mat world2cam_;
+  cv::Mat scaling_mat_init_;
   cv::Mat scaling_mat_;
   cv::Mat scaling_mat_inv_;
   cv::Size transformed_size_;
@@ -554,7 +557,6 @@ public:
 
     // safety check: width of segment is in bounds
     for (int i=0; i<imagePoints.size(); ++i) {
-//      ROS_INFO_STREAM("Lower width bound: "<<pxlPeakWidth*config_.minLineWidthMul<<" upper width bound: "<<pxlPeakWidth*config_.maxLineWidthMul);
       if (lineWidths[i] > pxlPeakWidth*config_.minLineWidthMul && lineWidths[i] < pxlPeakWidth*config_.maxLineWidthMul) {
         imageToWorld(imagePoints[i], wMid);
         ROS_INFO_STREAM("Found world point "<<wMid);
@@ -574,31 +576,13 @@ public:
   {
     cv::Mat processed_image;
     // step 0: cut image to line
-    ROS_INFO_STREAM("Trying to find ROI from: "<<sl.iStart<<" to: "<<sl.iEnd);
     int x_start = std::min(sl.iStart.x, sl.iEnd.x);
     int y_start = std::min(sl.iStart.y, sl.iEnd.y);
     int x_end = std::max(sl.iStart.x, sl.iEnd.x);
     int y_end = std::max(sl.iStart.y, sl.iEnd.y);
     bool x_increased = false, y_increased = false;
-//    if (x_start == x_end) {
-//      x_increased = true;
-//      x_end+=1;
-//    }
-//    if (y_start == y_end) {
-//      y_increased = true;
-//      y_end+=1;
-//    }
     x_end+=1;
     y_end+=1;
-    ROS_INFO("xstart %i, ystart %i, xend %i, yend %i, search_dir %i",x_start,y_start,x_end,y_end,search_dir);
-//    processed_image = current_image(cv::Rect(sl.iStart,
-//                                             cv::Point(sl.iEnd.x+(search_dir==search_direction::y),
-//                                                       sl.iEnd.y+(search_dir==search_direction::x))
-//                                             ));
-//    processed_image = current_image(cv::Rect(cv::Point(x_start, y_start), cv::Point(x_end+(search_dir==search_direction::y),
-//                                                                                    y_end+(search_dir==search_direction::x))
-//                                             ));
-//    processed_image = current_image(cv::Rect(cv::Point(x_start, y_start), cv::Point(x_end, y_end)));
     processed_image = current_image(cv::Rect(x_start, y_start, x_end-x_start, y_end-y_start));
 
     // step 1: threshold image with mat:
@@ -633,17 +617,17 @@ public:
       }
     }
 
-#ifdef DRAW_DEBUG
-    // display initial image
-    cv::Mat debug_image = processed_image.clone();
-    if (search_meth == search_method::brightness) {
-      cv::namedWindow("Thresholded image in brightness search", CV_WINDOW_NORMAL);
-      cv::imshow("Thresholded image in brightness search", debug_image);
-    } else if (search_meth == search_method::sobel) {
-      cv::namedWindow("Sobel image in line search", CV_WINDOW_NORMAL);
-      cv::imshow("Sobel image in line search", debug_image);
-    }
-#endif
+//#ifdef DRAW_DEBUG
+//    // display initial image
+//    cv::Mat debug_image = processed_image.clone();
+//    if (search_meth == search_method::brightness) {
+//      cv::namedWindow("Thresholded image in brightness search", CV_WINDOW_NORMAL);
+//      cv::imshow("Thresholded image in brightness search", debug_image);
+//    } else if (search_meth == search_method::sobel) {
+//      cv::namedWindow("Sobel image in line search", CV_WINDOW_NORMAL);
+//      cv::imshow("Sobel image in line search", debug_image);
+//    }
+//#endif
 
     if (search_meth == search_method::brightness) {
       // step3: get connected components (can be multiple) and calculate midpoints
@@ -677,40 +661,22 @@ public:
         }
       }
     } else if (search_meth == search_method::sobel) {
-//      ROS_INFO_STREAM("SOBEL MAT: "<<processed_image);
-//      ROS_INFO_STREAM("Image size: "<<processed_image.size()<<"point in corner: "<<sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x));
       bool lowhigh_found = false;
       int first = 0;
       cv::Point first_pos;
-//      ROS_INFO_STREAM("SL Start at: "<<sl.iStart<<" end at: "<<sl.iEnd);
-//      ROS_INFO_STREAM("Line endpoint without abs at: "<<sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1)
-//                      <<" with abs: "<<absPoint(sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1)));
-//      cv::LineIterator it(processed_image, cv::Point(0,0), /*absPoint(*/sl.iEnd-sl.iStart+cv::Point(search_dir==search_direction::y, search_dir==search_direction::x)-cv::Point(1,1)/*)*/);
-
       cv::Point start_point = cv::Point(0,0);
       cv::Point end_point = cv::Point(x_end-x_start-(int)x_increased,y_end-y_start-(int)y_increased);
       cv::LineIterator it(processed_image, start_point,end_point);
-      ROS_INFO_STREAM("Created iterator from "<<start_point<<" to "<<end_point<<" count: "<<it.count<<" image size: "<<processed_image.size<<" y increased"<<y_increased<<" x increased "<<x_increased);
       // the same search line can find multiple line segments
       for(int i=0; i<it.count; ++i, ++it)
       {
-//        ROS_INFO_STREAM("processed_image at: "<<processed_image.at<signed short>(it.pos())<<" position: "<<it.pos());
         if (processed_image.at<short int>(it.pos()) > config_.sobelThreshold) {
           lowhigh_found = true;
           first = i;
           first_pos = it.pos();
         } else if (lowhigh_found && processed_image.at<signed short>(it.pos()) < -config_.sobelThreshold) {
           line_widths.push_back(i-first);
-          // we are not actually using search directions only but all directions
-          // todo: make dynamic kernel based on direction
-//          if (search_dir == search_direction::x) {
-//            image_points.push_back((it.pos()+first_pos)/2+first_pos+sl.iStart);
-//          }
-//          else if (search_dir == search_direction::y) {
-//            ROS_INFO_STREAM("MEAN POINT OF: "<<it.pos()<<" and first: "<<first_pos<<" is: "<<cv::Point((it.pos()+first_pos)/2));
-//          image_points.push_back(cv::Point((it.pos()+start_point)/*/2*/+cv::Point(x_start,y_start)));
           image_points.push_back(cv::Point((it.pos()+first_pos)/2+cv::Point(x_start,y_start)));
-//          }
           lowhigh_found = false;
         }
       }

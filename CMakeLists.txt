@@ -33,8 +33,9 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Boost REQUIRED)
 
 generate_dynamic_reconfigure_options(
-  cfg/LineDetection.cfg
+  cfg/RoadDetection.cfg
   cfg/CrossingDetection.cfg
+  cfg/CrosswalkDetection.cfg
 )
 
 catkin_package(

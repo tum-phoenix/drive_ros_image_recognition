@@ -5,51 +5,17 @@
 
 namespace drive_ros_image_recognition {
 
-CrosswalkDetection::CrosswalkDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh):
-  nh_(nh)
-, pnh_(pnh)
-, it_(pnh)
-, road_hints_buffer_(0)
+CrosswalkDetection::CrosswalkDetection() :
+  Detection()
+{
+}
+
+CrosswalkDetection::CrosswalkDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh, image_transport::ImageTransport *it):
+  Detection(nh, pnh, it)
 {
 }
 
 CrosswalkDetection::~CrosswalkDetection() {
-}
-
-bool CrosswalkDetection::init() {
-  image_operator_ = ImageOperator();
-  if (!image_operator_.init()) {
-    ROS_ERROR("Failed to initialize ImageOperator, shutting down!");
-    return false;
-  }
-
-#ifdef PUBLISH_DEBUG
-  visualization_pub_ = it_.advertise("crosswalk_visualization_pub", 10);
-#endif
-
-  std::string world_frame("/rear_axis_middle");
-  if (!pnh_.getParam("world_frame", world_frame)) {
-    ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<world_frame);
-  }
-  image_operator_.setWorldFrame(world_frame);
-
-  // temporary solution until we set the correct frame
-  std::string camera_frame("/camera_optical");
-  if (!pnh_.getParam("camera_frame", camera_frame)) {
-    ROS_WARN_STREAM("Unable to load 'camera_frame' parameter, using default: "<<camera_frame);
-  }
-  image_operator_.setCameraFrame(camera_frame);
-
-  // sync callback registration
-//  img_sub_.reset(new image_transport::SubscriberFilter(imageTransport_,"/warped_image", 5));
-//  road_sub_.reset(new message_filters::Subscriber<drive_ros_msgs::RoadLane>(pnh_,"/road_detection/road_in", 5));
-//  sync_.reset(new message_filters::Synchronizer<SyncImageToHints>(SyncImageToHints(5), *img_sub_, *road_sub_));
-//  sync_->registerCallback(boost::bind(&StreetCrossingDetection::syncCallback, this, _1, _2));
-
-  // just the image callback -> used for debugging purposes for now
-  img_sub_standalone_ = it_.subscribe("/warped_image", 1000, &CrosswalkDetection::imageCallback, this);
-
-  return true;
 }
 
 // debug callback, creates a dummy line
@@ -76,12 +42,6 @@ void CrosswalkDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in)
   return;
 }
 
-void CrosswalkDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in) {
-  current_image_ = convertImageMessage(img_in);
-  road_hints_buffer_ = road_in->points;
-  find();
-}
-
 bool CrosswalkDetection::find() {
   if (road_hints_buffer_.size() < 2) {
     ROS_ERROR("[crosswalk detection] Less than 2 points in buffer, skipping search.");
@@ -91,9 +51,8 @@ bool CrosswalkDetection::find() {
   linestring mid, left, right;
   std::string frame_id = road_hints_buffer_.front().header.frame_id;
   geometrypointsToLinestring(road_hints_buffer_, mid);
-  // todo: add parameter for the search line width
-  drive_ros_geometry_common::moveOrthogonal(mid, left, 0.2);
-  drive_ros_geometry_common::moveOrthogonal(mid, right, -0.2);
+  drive_ros_geometry_common::moveOrthogonal(mid, left, config_.searchLineWidth/2);
+  drive_ros_geometry_common::moveOrthogonal(mid, right, -config_.searchLineWidth/2);
 
   //trying to find the stop-line
   std::vector<cv::Point3d> search_points_left, search_points_right;
@@ -131,17 +90,20 @@ bool CrosswalkDetection::find() {
     fixedLineOrdering(search_line, search_direction::y);
 
     image_operator_.findByLineSearch(search_line, *current_image_, search_direction::y, search_method::sobel, image_points, line_widths);
-    ROS_INFO_STREAM("Found "<<image_points.size()<<" points in image");
+    ROS_DEBUG_STREAM("[crosswalk detection] Found "<<image_points.size()<<" points in image");
 
-    if (image_points.size() > 5) {
-      ROS_INFO_STREAM("Found vertical point at "<<image_points[0]);
-    }
 #if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
     cv::line(crosswalk_points_mat, search_line.iStart, search_line.iEnd, cv::Scalar(255,0,0), 1);
     for (auto point : image_points) {
       cv::circle(crosswalk_points_mat, point, 2, cv::Scalar(0,255,0));
     }
 #endif
+    if (image_points.size() > 5) {
+      ROS_INFO_STREAM("[crosswalk detection] Found street crossing from "<<image_points.front()<<" to "<<image_points.back());
+#if defined(DRAW_DEBUG) || defined(PUBLISH_DEBUG)
+      cv::line(crosswalk_points_mat, image_points.front(), image_points.back(), cv::Scalar(0,255,0), 1);
+#endif
+    }
   }
 #ifdef DRAW_DEBUG
   cv::imshow("Crosswalk detection", crosswalk_points_mat);
@@ -153,18 +115,6 @@ bool CrosswalkDetection::find() {
   return true;
 }
 
-void CrosswalkDetectionNodelet::onInit() {
-  crosswalk_detection_.reset(new CrosswalkDetection(getNodeHandle(),getPrivateNodeHandle()));
-  if (!crosswalk_detection_->init()) {
-    ROS_ERROR("Crosswalk detection nodelet failed to initialize");
-    // nodelet failing will kill the entire loader anyway
-    ros::shutdown();
-  }
-  else {
-    ROS_INFO("Crosswalk detection nodelet succesfully initialized");
-  }
-}
-
 } // namespace drive_ros_image_recognition
 
-PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::CrosswalkDetectionNodelet, nodelet::Nodelet)
+PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::CrosswalkDetection, nodelet::Nodelet)

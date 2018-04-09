@@ -3,168 +3,77 @@
 
 namespace drive_ros_image_recognition {
 
-RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh):
-  nh_(nh),
-  pnh_(pnh),
-//  img_sub_(),
-//  road_sub_(),
-//  sync_(),
-  searchOffset_(0.15),
-  distanceBetweenSearchlines_(0.1),
-  minLineWidthMul_(0.5),
-  maxLineWidthMul_(2),
-  findPointsBySobel_(true),
-  brightness_threshold_(50),
-  sobelThreshold_(50),
-  laneWidthOffsetInMeter_(0.1),
-  translateEnvironment_(false),
-  useWeights_(false),
-  laneWidth_(0.4),
-  line_output_pub_(),
-  it_(nh),
-#ifdef PUBLISH_DEBUG
-  debug_img_pub_(),
-  detected_points_pub_(),
-  filtered_points_pub_(),
-#endif
-  dsrv_server_(),
-  dsrv_cb_(boost::bind(&RoadDetection::reconfigureCB, this, _1, _2)),
-  lines_(),
-  linesToProcess_(0),
-  current_image_(),
-  road_points_buffer_(),
-  image_operator_()
-,  img_sub_debug_()
-, mutex_()
+RoadDetection::RoadDetection() : RoadDetection(ros::NodeHandle(), ros::NodeHandle(), nullptr) {}
+
+RoadDetection::RoadDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh, image_transport::ImageTransport *it):
+  line_output_pub_()
+, lines_()
+, road_points_buffer_()
 , last_received_transform_()
 , tf_listener_()
-, road_hints_buffer_()
 #ifdef PUBLISH_WORLD_POINTS
-  ,world_point_pub_()
+, world_point_pub_()
 #endif
+, Detection(nh, pnh, it)
 {
 }
 
 bool RoadDetection::init() {
-  // load parameters
-  if (!pnh_.getParam("road_detection/searchOffset", searchOffset_)) {
-    ROS_WARN_STREAM("Unable to load 'searchOffset' parameter, using default: "<<searchOffset_);
-  }
-
-  if (!pnh_.getParam("road_detection/distanceBetweenSearchlines", distanceBetweenSearchlines_)) {
-    ROS_WARN_STREAM("Unable to load 'distanceBetweenSearchlines' parameter, using default: "<<distanceBetweenSearchlines_);
-  }
-
-  if (!pnh_.getParam("road_detection/minLineWidthMul", minLineWidthMul_)) {
-    ROS_WARN_STREAM("Unable to load 'minLineWidthMul' parameter, using default: "<<minLineWidthMul_);
-  }
-
-  if (!pnh_.getParam("road_detection/maxLineWidthMul", maxLineWidthMul_)) {
-    ROS_WARN_STREAM("Unable to load 'maxLineWidthMul' parameter, using default: "<<maxLineWidthMul_);
-  }
-
-  if (!pnh_.getParam("road_detection/findBySobel", findPointsBySobel_)) {
-    ROS_WARN_STREAM("Unable to load 'findBySobel' parameter, using default: "<<findPointsBySobel_);
-  }
-
-  if (!pnh_.getParam("road_detection/brightness_threshold", brightness_threshold_)) {
-    ROS_WARN_STREAM("Unable to load 'threshold' parameter, using default: "<<brightness_threshold_);
-  }
-
-  if (!pnh_.getParam("road_detection/sobelThreshold", sobelThreshold_)) {
-    ROS_WARN_STREAM("Unable to load 'sobelThreshold' parameter, using default: "<<sobelThreshold_);
-  }
-
-  if (!pnh_.getParam("road_detection/laneWidthOffsetInMeter", laneWidthOffsetInMeter_)) {
-    ROS_WARN_STREAM("Unable to load 'laneWidthOffsetInMeter' parameter, using default: "<<laneWidthOffsetInMeter_);
-  }
-
-  if (!pnh_.getParam("road_detection/translateEnvironment", translateEnvironment_)) {
-    ROS_WARN_STREAM("Unable to load 'translateEnvironment' parameter, using default: "<<translateEnvironment_);
-  }
-
-  if (!pnh_.getParam("road_detection/useWeights", useWeights_)) {
-    ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<useWeights_);
-  }
-
-  image_operator_ = ImageOperator();
-  if (!image_operator_.init()) {
-    ROS_ERROR("Failed to initialize ImageOperator, shutting down!");
+  if (!Detection::init())
     return false;
+
+  // load parameters
+  if (!pnh_.getParam("road_detection/searchOffset", config_.searchOffset)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'searchOffset' parameter, using default: "<<config_.searchOffset);
   }
 
-  std::string world_frame("/rear_axis_middle");
-  if (!pnh_.getParam("world_frame", world_frame)) {
-    ROS_WARN_STREAM("Unable to load 'useWeights' parameter, using default: "<<world_frame);
+  if (!pnh_.getParam("road_detection/distanceBetweenSearchlines", config_.distanceBetweenSearchlines)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'distanceBetweenSearchlines' parameter, using default: "<<config_.distanceBetweenSearchlines);
   }
-  image_operator_.setWorldFrame(world_frame);
 
-  // temporary solution until we set the correct frame
-  std::string camera_frame("/camera_optical");
-  if (!pnh_.getParam("camera_frame", camera_frame)) {
-    ROS_WARN_STREAM("Unable to load 'camera_frame' parameter, using default: "<<camera_frame);
+  if (!pnh_.getParam("road_detection/minLineWidthMul", config_.minLineWidthMul)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'minLineWidthMul' parameter, using default: "<<config_.minLineWidthMul);
   }
-  image_operator_.setCameraFrame(camera_frame);
 
-  dsrv_server_.setCallback(dsrv_cb_);
+  if (!pnh_.getParam("road_detection/maxLineWidthMul", config_.maxLineWidthMul)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'maxLineWidthMul' parameter, using default: "<<config_.maxLineWidthMul);
+  }
+
+  if (!pnh_.getParam("road_detection/findBySobel", config_.findBySobel)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'findBySobel' parameter, using default: "<<config_.findBySobel);
+  }
+
+  if (!pnh_.getParam("road_detection/brightness_threshold", config_.brightness_threshold)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'threshold' parameter, using default: "<<config_.brightness_threshold);
+  }
+
+  if (!pnh_.getParam("road_detection/sobelThreshold", config_.sobelThreshold)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'sobelThreshold' parameter, using default: "<<config_.sobelThreshold);
+  }
+
+  if (!pnh_.getParam("road_detection/laneWidthOffsetInMeter", config_.laneWidthOffsetInMeter)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'laneWidthOffsetInMeter' parameter, using default: "<<config_.laneWidthOffsetInMeter);
+  }
+
+  if (!pnh_.getParam("road_detection/translateEnvironment", config_.translateEnvironment)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'translateEnvironment' parameter, using default: "<<config_.translateEnvironment);
+  }
+
+  if (!pnh_.getParam("road_detection/useWeights", config_.useWeights)) {
+    ROS_WARN_STREAM("[road detection] Unable to load 'useWeights' parameter, using default: "<<config_.useWeights);
+  }
 
 #ifdef PUBLISH_WORLD_POINTS
   world_point_pub_ = pnh_.advertise<geometry_msgs::PointStamped>("worldPoints", 1000);
 #endif
 
-  // fill initial hints -> straight line with 10cm spacing
-  geometry_msgs::PointStamped temp_point;
-  temp_point.header.frame_id = world_frame;
-  temp_point.point.x = 0;
-  temp_point.point.y = 0;
-  temp_point.point.z = 0;
-  for (int i = 3; i < 7; ++i) {
-    temp_point.point.x = i*0.1;
-    road_points_buffer_.push_back(temp_point);
-  }
-
-  img_sub_ =  it_.subscribe("img_in", 1000, &RoadDetection::imageCallback, this);
-
-  // to synchronize incoming images and the road, we use message filters
-//  img_sub_.reset(new image_transport::SubscriberFilter(it_,"img_in", 10));
-//  img_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(nh_,"/warped_image",5));
-
-////  message_filters::Subscriber<sensor_msgs::Image> test_sub(pnh_,"img_in", 1000);
-//  road_sub_.reset(new message_filters::Subscriber<drive_ros_msgs::RoadLane>(pnh_,"/road_detection/road_in", 5));
-////  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
-
-//  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(5), *img_sub_, *road_sub_));
-////  sync_.reset(new message_filters::Synchronizer<SyncImageToRoad>(SyncImageToRoad(1), *img_sub_, test_sub));
-////  sync_->setAgePenalty(1.0);
-//  ROS_INFO("BEFORE REGISTERING CALLBACK");
-//  sync_->registerCallback(boost::bind(&RoadDetection::syncCallback, this, _1, _2));
-
-//  // Debug callbacks for testing
-////  img_sub_debug_ = it_.subscribe("img_in", 1000, &RoadDetection::debugImageCallback, this);
-////  img_sub_debug_ = it_.subscribe("img_in", 1000, boost::bind(&RoadDetection::debugDrawFrameCallback, this,
-////                                                             _1, std::string("/camera_optical"), std::string("/front_axis_middle")));
-
   line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLane>("line_out",10);
-
-#ifdef PUBLISH_DEBUG
-  debug_img_pub_ = it_.advertise("debug_image_out", 10);
-  detected_points_pub_ = it_.advertise("detected_points_out", 10);
-  filtered_points_pub_ = it_.advertise("filtered_points_out", 10);
-#endif
-
-  // todo: we have not decided on an interface for these debug channels yet
-  //    debugAllPoints = writeChannel<lms::math::polyLine2f>("DEBUG_ALL_POINTS");
-  //    debugValidPoints = writeChannel<lms::math::polyLine2f>("DEBUG_VALID_POINTS");
-  //    debugTranslatedPoints = writeChannel<lms::math::polyLine2f>("DEBUG_VALID_TRANSLATED_POINTS");
-
-  // todo: we have not defined the interface for this yet
-  //    car = readChannel<street_environment::CarCommand>("CAR"); //TODO create ego-estimation service
 
   try {
     ros::Duration timeout(1);
-    tf_listener_.waitForTransform("/odom", world_frame,
+    tf_listener_.waitForTransform("/odom", image_operator_.getWorldFrame(),
                                   ros::Time::now(), timeout);
-    tf_listener_.lookupTransform("/odom", world_frame,
+    tf_listener_.lookupTransform("/odom", image_operator_.getWorldFrame(),
                                  ros::Time::now(), last_received_transform_);
   }
   catch (tf::TransformException& ex) {
@@ -231,13 +140,23 @@ void RoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
   }
   catch (cv_bridge::Exception& e)
   {
-    ROS_ERROR("cv_bridge exception: %s", e.what());
+    ROS_ERROR("[road detection] cv_bridge exception: %s", e.what());
     return;
   }
 
-  // maybe tf is smart enough to use based on the stamps and do this
-  std::vector<geometry_msgs::PointStamped> moved_points;
+  // fill initial hints -> straight line with 10cm spacing
+  road_points_buffer_.clear();
   geometry_msgs::PointStamped temp_point;
+  temp_point.header.frame_id = image_operator_.getWorldFrame();
+  temp_point.point.x = 0;
+  temp_point.point.y = 0;
+  temp_point.point.z = 0;
+  for (int i = 3; i < 7; ++i) {
+    temp_point.point.x = i*0.1;
+    road_points_buffer_.push_back(temp_point);
+  }
+
+  std::vector<geometry_msgs::PointStamped> moved_points;
   for (const geometry_msgs::PointStamped& last_point : road_points_buffer_) {
     tf_listener_.transformPoint(image_operator_.getWorldFrame(), last_point, temp_point);
     moved_points.push_back(temp_point);
@@ -246,13 +165,11 @@ void RoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
   int rect_offset = 64;
   image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
 
-  std::lock_guard<std::mutex> guard(mutex_);
-
   // since we are handling hints internally we cannot have no hints at all
   find();
 
   if (road_points_buffer_.size() != road_hints_buffer_.size()) {
-    ROS_WARN_STREAM("Sizes of new hint points and the last frame hint buffer do not match, using last hints unchanged");
+    ROS_INFO_STREAM("[road detection] Sizes of new hint points and the last frame hint buffer do not match, using last hints unchanged");
     return;
   }
 
@@ -266,50 +183,35 @@ void RoadDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
 
 void RoadDetection::syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in){
   current_image_ = convertImageMessage(img_in);
-  // set image checkbox in order to verfiy that transformed points are inside the image
+  // set image checkbox in order to verify that transformed points are inside the image
   // todo: add parameter for this
   int rect_offset = 64;
   image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
   road_points_buffer_ = road_in->points;
-  // debug image display
-//  cv::namedWindow("cutout window", CV_WINDOW_NORMAL);
-//  cv::imshow("cutout window", (*current_image_)(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset)));
-//  cv::waitKey(1);
 
-  std::lock_guard<std::mutex> guard(mutex_);
-
-  //if we have a road(?), try to find the line
+  // if we have a valid road, try to find the line
   if(road_in->points.size() >= 1){
-    find(); //TODO use bool from find
+    find();
   } else {
-    ROS_WARN("Road buffer has no points stored");
+    ROS_WARN("[road detection] Road buffer has no points stored");
   }
 
-
-//  float dx = 0;
-//  float dy = 0;
-//  float dPhi = 0;
-
+  // todo: no interface for this yet, create course verification service to verfiy and publish
+  //  float dx = 0;
+  //  float dy = 0;
+  //  float dPhi = 0;
   //update the course
   // todo: no access to car command interface yet
   //    if(!translate_environment_){
   //        logger.info("translation")<<car->deltaPhi();
   //        dPhi = car->deltaPhi();
   //    }
-
-  // todo: no interface for this yet, create course verification service to verfiy and publish
   //    lms::ServiceHandle<local_course::LocalCourse> localCourse = getService<local_course::LocalCourse>("LOCAL_COURSE_SERVICE");
   //    if(localCourse.isValid()){
   //        logger.time("localCourse");
   //        localCourse->update(dx,dy,dPhi);
   //        *road = localCourse->getCourse();
   //        logger.timeEnd("localCourse");
-#ifdef DRAW_DEBUG
-  // todo: no interface for this yet
-  //        if(renderDebugImage){
-  //                debugTranslatedPoints->points() = localCourse->getPointsAdded();
-  //        }
-#endif
   // should do something like this
   //    line_output_pub_.publish(road_translated);
 
@@ -323,7 +225,6 @@ bool RoadDetection::find(){
   //clear old lines
   ROS_INFO("Creating new lines");
   lines_.clear();
-  linesToProcess_ = 0;
   // we want at least two line points, otherwise we will simply not have any lines (duh)
   if (road_points_buffer_.size() < 2) {
     ROS_WARN("Less than 2 points in received RoadLane message - not using it.");
@@ -341,41 +242,20 @@ bool RoadDetection::find(){
   // simplify mid (previously done with distance-based algorithm
   // skip this for now, can completely clear the line
 //  drive_ros_geometry_common::simplify(mid, mid, distanceBetweenSearchlines_);
-  drive_ros_geometry_common::moveOrthogonal(mid, left, -laneWidth_);
-  drive_ros_geometry_common::moveOrthogonal(mid, right, laneWidth_);
+  drive_ros_geometry_common::moveOrthogonal(mid, left, -config_.lineWidth);
+  drive_ros_geometry_common::moveOrthogonal(mid, right, config_.lineWidth);
   if(mid.size() != left.size() || mid.size() != right.size()){
     ROS_ERROR("Generated lane sizes do not match! Aborting search!");
     return false;
   }
 
   // make transforms from whatever frame the points are in to the world
-  // this is ugly, put it here just to test if it works for now
-  geometry_msgs::PointStamped moved_point;
-  geometry_msgs::PointStamped moved_point_camera;
-  // assuming all points in message are in the same frame (they should)
-  moved_point.header.frame_id = road_points_buffer_.front().header.frame_id;
+  // assuming all points in message are in the same frame (as they should)
+  std::string frame_id = road_points_buffer_.front().header.frame_id;
   std::vector<cv::Point3d> mid_temp, left_temp, right_temp;
-  auto it_mid_bg = mid.begin();
-  auto it_left_bg = left.begin();
-  auto it_right_bg = right.begin();
-  auto it_original = road_points_buffer_.begin();
-  for(int it = 0; it<mid.size(); ++it, ++it_mid_bg, ++it_original, ++it_right_bg, ++it_left_bg){
-    moved_point.point.x = it_mid_bg->x();
-    moved_point.point.y = it_mid_bg->y();
-    moved_point.point.z = it_original->point.z;
-    image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
-    mid_temp.push_back(cv::Point3d(moved_point_camera.point.x, moved_point_camera.point.y, moved_point_camera.point.z));
-    moved_point.point.x = it_left_bg->x();
-    moved_point.point.y = it_left_bg->y();
-    moved_point.point.z = it_original->point.z;
-    image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
-    left_temp.push_back(cv::Point3d(moved_point_camera.point.x, moved_point_camera.point.y, moved_point_camera.point.z));
-    moved_point.point.x = it_right_bg->x();
-    moved_point.point.y = it_right_bg->y();
-    moved_point.point.z = it_original->point.z;
-    image_operator_.transformPointToImageFrame(moved_point,moved_point_camera);
-    right_temp.push_back(cv::Point3d(moved_point_camera.point.x, moved_point_camera.point.y, moved_point_camera.point.z));
-  }
+  image_operator_.linestringToImageFrame(mid, mid_temp, frame_id);
+  image_operator_.linestringToImageFrame(left, left_temp, frame_id);
+  image_operator_.linestringToImageFrame(right, right_temp, frame_id);
 
   //get all lines
   // todo: assert equal length of right, middle and left points (in world frame plane and image)
@@ -436,18 +316,18 @@ geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l
   std::vector<cv::Point2f> foundPoints;
 
   // draw search line points in image
-#ifdef DRAW_DEBUG
-  cv::namedWindow("Line search points", CV_WINDOW_NORMAL);
-  cv::Mat debug_image_line;
-  cv::cvtColor(current_image_->clone(), debug_image_line, cv::COLOR_GRAY2RGB);
-  cv::circle(debug_image_line, l.iStart, 3, cv::Scalar(255,0,0));
-  cv::circle(debug_image_line, l.iEnd, 3, cv::Scalar(0,0,255));
-  cv::line(debug_image_line, l.iStart, l.iEnd, cv::Scalar(0,255,0));
-  cv::imshow("Line search points", debug_image_line);
-#endif
+//#ifdef DRAW_DEBUG
+//  cv::namedWindow("Line search points", CV_WINDOW_NORMAL);
+//  cv::Mat debug_image_line;
+//  cv::cvtColor(current_image_->clone(), debug_image_line, cv::COLOR_GRAY2RGB);
+//  cv::circle(debug_image_line, l.iStart, 3, cv::Scalar(255,0,0));
+//  cv::circle(debug_image_line, l.iEnd, 3, cv::Scalar(0,0,255));
+//  cv::line(debug_image_line, l.iStart, l.iEnd, cv::Scalar(0,255,0));
+//  cv::imshow("Line search points", debug_image_line);
+//#endif
 
   //find points
-  if(findPointsBySobel_){
+  if(config_.findBySobel){
     // todo: investigate why line width was hard-coded at 0.02 -> maybe add parameter
     foundPoints = image_operator_.returnValidPoints(l, *current_image_, 0.02, search_direction::y, search_method::sobel);
   }else{
@@ -476,7 +356,8 @@ geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l
         // todo: insert service here
         const cv::Point2f &toTest  = foundPoints[test];
         float distance = cv::norm(s-toTest);
-        if((distance > laneWidth_-laneWidthOffsetInMeter_ && distance < laneWidth_+laneWidthOffsetInMeter_)|| (distance > 0.8-laneWidthOffsetInMeter_ && distance < 0.8+laneWidthOffsetInMeter_)){
+        if((distance > config_.lineWidth-config_.laneWidthOffsetInMeter && distance < config_.lineWidth+config_.laneWidthOffsetInMeter)||
+           (distance > 0.8-config_.laneWidthOffsetInMeter && distance < 0.8+config_.laneWidthOffsetInMeter)){
           foundCounter[test]++;
           foundCounter[fp]++;
         }
@@ -533,11 +414,11 @@ geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l
     diff = (l.wLeft - l.wRight)/cv::norm(l.wLeft-l.wRight);
     if(distanceToLeft < distanceToMid && distanceToLeft < distanceToRight){
       //left point
-      validPoints[i]-=diff*laneWidth_;
+      validPoints[i]-=diff*config_.lineWidth;
       distances.push_back(distanceToLeft);
     }else if(distanceToRight < distanceToMid ){
       // right lane
-      validPoints[i]+=diff*laneWidth_;
+      validPoints[i]+=diff*config_.lineWidth;
       distances.push_back(distanceToRight);
     }else{
       // middle lane
@@ -548,7 +429,7 @@ geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l
   std::vector<float> weights;
   for(const float &dist:distances){
     //as distance is in meter, we multiply it by 100
-    if(useWeights_)
+    if(config_.useWeights)
       weights.push_back(1/(dist*100+0.001)); //TODO hier etwas sinnvolles überlegen
     else
       weights.push_back(1);
@@ -582,34 +463,9 @@ geometry_msgs::PointStamped RoadDetection::processSearchLine(const SearchLine &l
   return hint_point;
 }
 
-void RoadDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig &config, uint32_t level){
-  image_operator_.setConfig(config);
-  searchOffset_ = config.searchOffset;
-  findPointsBySobel_ = config.findBySobel;
-  minLineWidthMul_ = config.minLineWidthMul;
-  maxLineWidthMul_ = config.maxLineWidthMul;
-  brightness_threshold_ = config.brightness_threshold;
-  laneWidthOffsetInMeter_ = config.laneWidthOffsetInMeter;
-  laneWidth_ = config.lineWidth;
-  useWeights_ = config.useWeights;
-  sobelThreshold_ = config.sobelThreshold;
-}
-
 RoadDetection::~RoadDetection() {
-}
-
-void RoadDetectionNodelet::onInit() {
-  road_detection_.reset(new RoadDetection(getNodeHandle(),getPrivateNodeHandle()));
-  if (!road_detection_->init()) {
-    ROS_ERROR("road_detection nodelet failed to initialize");
-    // nodelet failing will kill the entire loader anyway
-    ros::shutdown();
-  }
-  else {
-    ROS_INFO("road detection nodelet succesfully initialized");
-  }
 }
 
 } // namespace drive_ros_image_recognition
 
-PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::RoadDetectionNodelet, nodelet::Nodelet)
+PLUGINLIB_EXPORT_CLASS(drive_ros_image_recognition::RoadDetection, nodelet::Nodelet)
