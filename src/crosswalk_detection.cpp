@@ -20,8 +20,6 @@ CrosswalkDetection::~CrosswalkDetection() {
 
 // debug callback, creates a dummy line
 void CrosswalkDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
-  current_image_ = convertImageMessage(img_in);
-
   // fill hints with dummy points
   road_hints_buffer_.clear();
   geometry_msgs::PointStamped temp_point;
@@ -35,10 +33,7 @@ void CrosswalkDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in)
   temp_point.point.x = 0.3;
   road_hints_buffer_.push_back(temp_point);
 
-  // crop image by 64 from all directions and find
-  int rect_offset = 64;
-  image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
-  find();
+  Detection::imageCallback(img_in);
   return;
 }
 

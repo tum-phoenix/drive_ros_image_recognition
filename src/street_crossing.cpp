@@ -1,9 +1,11 @@
-#include <opencv2/imgproc.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <vector>
 #include "drive_ros_image_recognition/street_crossing.h"
 #include <drive_ros_image_recognition/geometry_common.h>
 #include <pluginlib/class_list_macros.h>
+
+#if defined(DRAW_DEBUG)
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#endif
 
 namespace drive_ros_image_recognition {
 
@@ -21,11 +23,6 @@ StreetCrossingDetection::~StreetCrossingDetection() {
 }
 
 void StreetCrossingDetection::imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
-  current_image_ = convertImageMessage(img_in);
-
-  // crop image by 64 from all directions
-  int rect_offset = 64;
-  image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
 
   // fill initial line hints -> points offset 5cm in the y direction
   road_hints_buffer_.clear();
@@ -40,18 +37,7 @@ void StreetCrossingDetection::imageCallback(const sensor_msgs::ImageConstPtr& im
   temp_point.point.x = 0.3;
   road_hints_buffer_.push_back(temp_point);
 
-  // since we are handling hints internally we cannot have no hints at all
-  find();
-
-//  if (road_points_buffer_.size() != road_hints_buffer_.size()) {
-//    ROS_WARN_STREAM("Sizes of new hint points and the last frame hint buffer do not match, using last hints unchanged");
-//    return;
-//  }
-
-  // will skip steps in which it failed to find a valid lane midpoint (more than 2 points for now)
-//  for (int i=0; i<road_hints_buffer_.size(); ++i)
-//    if (road_hints_buffer_[i].point.x != 0.0 || road_hints_buffer_[i].point.z != 0.0)
-//      road_points_buffer_[i] = road_hints_buffer_[i];
+  Detection::imageCallback(img_in);
 
   return;
 }

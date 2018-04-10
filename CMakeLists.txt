@@ -36,6 +36,7 @@ generate_dynamic_reconfigure_options(
   cfg/RoadDetection.cfg
   cfg/CrossingDetection.cfg
   cfg/CrosswalkDetection.cfg
+  cfg/SpeedMarkingDetection.cfg
 )
 
 catkin_package(
@@ -241,6 +242,47 @@ install(TARGETS crosswalk_detection_node
     )
 
 ################################################################################
+# Speed marking detection nodelet
+################################################################################
+
+add_library(speed_marking_detection_nodelet
+    src/speed_marking_detection.cpp
+    )
+
+add_dependencies(speed_marking_detection_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(speed_marking_detection_nodelet
+    ${catkin_LIBRARIES}
+    )
+
+install(TARGETS speed_marking_detection_nodelet
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
+# Speed marking detection node
+################################################################################
+
+add_executable(speed_marking_detection_node
+    src/speed_marking_detection.cpp
+    src/speed_marking_detection_node.cpp
+    )
+
+add_dependencies(speed_marking_detection_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(speed_marking_detection_node
+    ${catkin_LIBRARIES}
+    )
+
+install(TARGETS speed_marking_detection_node
+    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+    )
+
+################################################################################
 # Road publisher node (LMS port)
 ################################################################################
 
@@ -259,7 +301,6 @@ install(TARGETS publish_road
     LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
     )
-
 
 ################################################################################
 # Install other files
@@ -282,4 +323,9 @@ install(DIRECTORY launch/
 install(DIRECTORY config/
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
     FILES_MATCHING PATTERN "*.yaml"
+    )
+
+install(DIRECTORY config/
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
+    FILES_MATCHING PATTERN "*.xml"
     )

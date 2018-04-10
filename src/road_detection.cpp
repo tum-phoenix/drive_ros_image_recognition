@@ -1,6 +1,11 @@
 #include "drive_ros_image_recognition/road_detection.h"
 #include <pluginlib/class_list_macros.h>
 
+#if defined(DRAW_DEBUG)
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#endif
+
 namespace drive_ros_image_recognition {
 
 RoadDetection::RoadDetection() : RoadDetection(ros::NodeHandle(), ros::NodeHandle(), nullptr) {}

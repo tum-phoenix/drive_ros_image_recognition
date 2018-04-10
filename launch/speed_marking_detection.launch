@@ -9,12 +9,14 @@
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
+    <arg name="NM1" default="$(find drive_ros_image_recognition)/config/trained_classifierNM1.xml" />
+    <arg name="NM2"  default="$(find drive_ros_image_recognition)/config/trained_classifierNM2.xml" />
 
     <arg if="$(arg debug)" name="launch-prefix" value="gdb -ex run --args"/>
     <arg unless="$(arg debug)" name="launch-prefix" value=""/>
 
     <group unless="$(arg use_nodelet)">
-        <node name="crosswalk_detection" pkg="drive_ros_image_recognition" type="crosswalk_detection_node" respawn="false" output="screen" launch-prefix="$(arg launch-prefix)">
+        <node name="speed_marking_detection" pkg="drive_ros_image_recognition" type="speed_marking_detection_node" respawn="false" output="screen" launch-prefix="$(arg launch-prefix)">
             <remap from="img_in" to="$(arg incoming_image)"/>
             <remap from="road_in" to="$(arg road_trajectory_topic)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
@@ -26,15 +28,17 @@
             <remap from="car" to "car_out"/> -->
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
+            <param name="NM1" type="string" value="$(arg NM1)"/>
+            <param name="NM2" type="string" value="$(arg NM2)"/>
         </node>
     </group>
 
     <group if="$(arg use_nodelet)">
-        <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="crosswalk_detection_nodelet_manager"/>
+        <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="speed_marking_nodelet_manager"/>
         <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
 
-        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="crosswalk_detection_nodelet_manager"  args="manager" output="screen"/>
-        <node pkg="nodelet" type="nodelet" name="crosswalk_detection_nodelet" args="load drive_ros_image_recognition/CrosswalkDetection $(arg manager_used)" output="screen" launch-prefix="$(arg launch-prefix)">
+        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="speed_marking_nodelet_manager"  args="manager" output="screen"/>
+        <node pkg="nodelet" type="nodelet" name="speed_marking_detection_nodelet" args="load drive_ros_image_recognition/SpeedMarkingDetection $(arg manager_used)" output="screen" launch-prefix="$(arg launch-prefix)">
             <remap from="img_in" to="$(arg incoming_image)"/>
             <remap from="road_in" to="$(arg road_trajectory_topic)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
@@ -46,6 +50,8 @@
             <remap from="car" to "car_out"/> -->
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/road_detection.yaml"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
+            <param name="NM1" type="string" value="$(arg NM1)"/>
+            <param name="NM2" type="string" value="$(arg NM2)"/>
         </node>
     </group>
 </launch>

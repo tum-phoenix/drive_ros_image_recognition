@@ -41,7 +41,25 @@ protected:
     std::vector<geometry_msgs::PointStamped> road_hints_buffer_;
     ImageOperator image_operator_;
 
-    virtual void imageCallback(const sensor_msgs::ImageConstPtr& img_in) = 0;
+    virtual void imageCallback(const sensor_msgs::ImageConstPtr& img_in) {
+      current_image_ = convertImageMessage(img_in);
+
+      // crop image by 64 from all directions
+      int rect_offset = 64;
+      image_operator_.setImageRect(cv::Rect(0, rect_offset, current_image_->cols, current_image_->rows-rect_offset));
+
+      find();
+
+      //  if (road_points_buffer_.size() != road_hints_buffer_.size()) {
+      //    ROS_WARN_STREAM("Sizes of new hint points and the last frame hint buffer do not match, using last hints unchanged");
+      //    return;
+      //  }
+
+        // will skip steps in which it failed to find a valid lane midpoint (more than 2 points for now)
+      //  for (int i=0; i<road_hints_buffer_.size(); ++i)
+      //    if (road_hints_buffer_[i].point.x != 0.0 || road_hints_buffer_[i].point.z != 0.0)
+      //      road_points_buffer_[i] = road_hints_buffer_[i];
+    }
     virtual void syncCallback(const sensor_msgs::ImageConstPtr& img_in, const drive_ros_msgs::RoadLaneConstPtr& road_in) {
       current_image_ = convertImageMessage(img_in);
       road_hints_buffer_ = road_in->points;

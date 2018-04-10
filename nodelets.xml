@@ -33,3 +33,12 @@
   </description>
   </class>
 </library>
+
+<!-- speed_marking_detection nodelet -->
+<library path="lib/libspeed_marking_detection_nodelet">
+  <class name="drive_ros_image_recognition/SpeedMarkingDetection" type="drive_ros_image_recognition::SpeedMarkingDetection" base_class_type="nodelet::Nodelet">
+  <description>
+  Croswall detection nodelet.
+  </description>
+  </class>
+</library>
