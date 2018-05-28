@@ -42,7 +42,7 @@ private:
   // communication
   image_transport::ImageTransport imageTransport_;
   image_transport::Subscriber imageSubscriber_;
-  ros::Publisher line_output_pub_; // note: not used yet
+  ros::Publisher line_output_pub_;
   ros::Subscriber homography_params_sub_;
 #ifdef PUBLISH_DEBUG
   image_transport::Publisher debugImgPub_;

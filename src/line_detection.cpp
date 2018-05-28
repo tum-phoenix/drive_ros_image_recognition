@@ -1,3 +1,4 @@
+#include <ros/ros.h>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <vector>
@@ -29,12 +30,11 @@ LineDetection::~LineDetection() {
 /// \return true for success, false for failure.
 ///
 bool LineDetection::init() {
-  // todo: topics as params
   // dynamic reconfigure
   dsrv_server_.setCallback(dsrv_cb_);
 
   //subscribe to camera image
-  imageSubscriber_ = imageTransport_.subscribe("img_in", 10, &LineDetection::imageCallback, this);
+  imageSubscriber_ = imageTransport_.subscribe("/img_in", 10, &LineDetection::imageCallback, this);
   ROS_INFO_STREAM("Subscribed image transport to topic " << imageSubscriber_.getTopic());
 
   line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLine>("roadLine", 10);
@@ -42,7 +42,7 @@ bool LineDetection::init() {
 
 #ifdef PUBLISH_DEBUG
   debugImgPub_ = imageTransport_.advertise("debug_image", 10);
-  ROS_INFO_STREAM("publishing debug image on topic " << debugImgPub_.getTopic());
+  ROS_INFO_STREAM("Publishing debug image on topic " << debugImgPub_.getTopic());
 #endif
 
   // common image operations
@@ -61,7 +61,6 @@ bool LineDetection::init() {
 ///
 void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
   currentImage_ = convertImageMessage(imgIn);
-
 //  auto t_start = std::chrono::high_resolution_clock::now();
   findLane();
 //  auto t_end = std::chrono::high_resolution_clock::now();
@@ -95,14 +94,6 @@ void LineDetection::findLane() {
   int polygonLengths[] = { 4 };
   cv::fillPoly(processingImg, polygonStarts, polygonLengths, 1, cv::Scalar(), cv::LINE_8);
 
-#ifdef PUBLISH_DEBUG
-  // Display the polygon which will be zeroed out
-//  cv::line(outputImg, vehiclePolygon[0][0], vehiclePolygon[0][1], cv::Scalar(255), 2, cv::LINE_AA);
-//  cv::line(outputImg, vehiclePolygon[0][1], vehiclePolygon[0][2], cv::Scalar(255), 2, cv::LINE_AA);
-//  cv::line(outputImg, vehiclePolygon[0][2], vehiclePolygon[0][3], cv::Scalar(255), 2, cv::LINE_AA);
-//  cv::line(outputImg, vehiclePolygon[0][3], vehiclePolygon[0][0], cv::Scalar(255), 2, cv::LINE_AA);
-#endif
-
   // Get houghlines
   std::vector<cv::Vec4i> hLinePoints;
   std::vector<Line> houghLines;
@@ -124,11 +115,11 @@ void LineDetection::findLane() {
   }
 
   // Create a static guess, in case we do not have on from the previous frame
-  // todo: we should only do, when the car starts in the start box. Otherwise we can get in trouble
+  // todo: we should only do this, when the car starts in the start box. Otherwise we can get in trouble
   worldPoints.clear();
   imagePoints.clear();
   if(currentGuess_.empty()) {
-    ROS_INFO_STREAM("dummy guess");
+    // todo: we should have a state like "LOST_LINE", where we try to find the middle line again (more checks, if it is really the middle one)
     worldPoints.push_back(cv::Point2f(0.24, 0.5));
     worldPoints.push_back(cv::Point2f(0.4, 0.5));
     worldPoints.push_back(cv::Point2f(0.55, 0.5));
@@ -139,7 +130,7 @@ void LineDetection::findLane() {
   }
 
 #ifdef PUBLISH_DEBUG
-  // Draw our guess
+  // Draw our guess (in blue)
   for(size_t i = 0; i < currentGuess_.size(); i++) {
     cv::line(outputImg, currentGuess_.at(i).iP1_, currentGuess_.at(i).iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
   }
@@ -196,7 +187,7 @@ void LineDetection::findLane() {
   }
 
   if(middleLine.empty()) {
-    // todo: handle this better
+    // todo: handle this better, e.g. use left and right lane and compute the middle lane if the distances are plausible
     ROS_INFO_STREAM("no middle line found");
     currentGuess_.clear();
 #ifdef PUBLISH_DEBUG
@@ -206,6 +197,7 @@ void LineDetection::findLane() {
   }
 
   // transform old line based on odometry
+  // todo: maybe we do not need this for now, since we have high frame rate and therefore the offset between frames is very small
 //  tf::StampedTransform transform;
 //  try{
 //    tfListener_.lookupTransform("/odometry", "/rear_axis_middle_ground", ros::Time(0), transform);
@@ -245,6 +237,7 @@ void LineDetection::findLane() {
 //  }
 
   // middle line is 0.2m long and then interrupted for 0.2m
+  // todo: in the extendes cup we can have double middle lines -> find a solution to this
   // todo: this should be checked
   // sort our middle lines based on wP1_.x of line
   std::sort(middleLine.begin(), middleLine.end(), [](Line &a, Line &b){ return a.wP1_.x < b.wP1_.x; });
@@ -269,7 +262,7 @@ void LineDetection::findLane() {
         a = vertices2f[1];
         b = vertices2f[2];
       }
-      // ensures the right order of the points in newMidLinePts vector
+      // ensures the correct order of the points in newMidLinePts vector
       if(a.x > b.x) {
         newMidLinePts.push_back(b);
         newMidLinePts.push_back(a);
@@ -369,7 +362,6 @@ void LineDetection::findLane() {
       }
     }
 
-
     bool done = false;
     for(size_t i = 1; i < currentGuess_.size() && !done; i++) {
       // angles between two connected segments should be plausible
@@ -384,7 +376,7 @@ void LineDetection::findLane() {
         currentGuess_.erase(currentGuess_.begin() + i, currentGuess_.end());
         done = true;
       } else if((i < (currentGuess_.size() - 1)) && currentGuess_.at(i).getLength() > 0.3) {
-        // if a segment is longer than 0.3m, the line is probably not dashed (so no middle line)
+        // if a segment is longer than 0.3m, the line is probably not dashed (so no middle line) todo: line does not have to be dashed
         // excluding the last segment, since we created this for searching forward
         ROS_INFO_STREAM("clipped line because of length");
         currentGuess_.erase(currentGuess_.begin() + i, currentGuess_.end());
@@ -396,7 +388,7 @@ void LineDetection::findLane() {
     currentMiddleLine_.insert(currentMiddleLine_.begin(), currentGuess_.begin(), currentGuess_.end() - (done ? 0 : 1));
 
 #ifdef PUBLISH_DEBUG
-    // draw our middle line
+    // draw our middle line (yellow)
     for(auto l : currentMiddleLine_) {
       cv::line(outputImg, l.iP1_, l.iP2_, cv::Scalar(255,0,255), 2, cv::LINE_AA);
     }

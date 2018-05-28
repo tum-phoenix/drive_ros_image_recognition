@@ -1,7 +1,7 @@
 <launch>
     <arg name="incoming_image" default="/camera/image_raw"/>
     <arg name="camera_info" default="/camera/camera_info"/>
-    <arg name="homography_topic" default="/camera/camera_homog"/>
+    <arg name="homography_topic" default="/camera/camera_homography"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
@@ -14,7 +14,7 @@
 
     <group unless="$(arg use_nodelet)">
         <node name="line_detection" pkg="drive_ros_image_recognition" type="line_detection_node" respawn="false" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
-            <remap from="~/img_in" to="$(arg incoming_image)"/>
+            <remap from="img_in" to="$(arg incoming_image)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
@@ -30,4 +30,9 @@
             <remap from="~/img_in" to="$(arg incoming_image)"/>
         </node>
     </group>
+
+    <include file="$(find drive_ros_ximea_importer)/launch/homography_publisher.launch">
+        <arg name="homography_topic" value="$(arg homography_topic)"/>
+    </include>
+
 </launch>

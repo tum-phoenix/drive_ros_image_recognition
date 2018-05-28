@@ -206,12 +206,15 @@ public:
                                                            boost::bind(&camInfo_callback, _1,
                                                                        std::ref(cam_model_),
                                                                        std::ref(camera_model_received_) ) );
+    ROS_INFO("TransformHelper subscribes to '%s' for camera_info", cam_info_sub_.getTopic().c_str());
+
     homography_sub_ = ros::NodeHandle().subscribe<drive_ros_msgs::Homography>("homography_in", 1,
                                                                            boost::bind(homography_callback, _1,
                                                                                        std::ref(cam2world_), std::ref(world2cam_),
                                                                                        std::ref(scaling_mat_), std::ref(scaling_mat_inv_),
                                                                                        std::ref(scaledCam2world_), std::ref(scaledWorld2cam_),
                                                                                        std::ref(homography_received_)));
+    ROS_INFO("TransformHelper subscribes to '%s' for homography", homography_sub_.getTopic().c_str());
     return true;
   }
 
