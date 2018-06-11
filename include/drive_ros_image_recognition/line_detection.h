@@ -23,6 +23,18 @@ private:
   ros::NodeHandle nh_;
   ros::NodeHandle pnh_;
 
+  // drive state enum
+  enum DriveState {
+      StartBox = 0,
+      Parking = 1,
+      Intersection = 2,
+      Street = 3
+  };
+
+  // drive mode config
+  bool isObstaceCourse; // true for Obstacle Evasion Course; false for Free Drive (w/o Obstacles) & Parking
+  DriveState driveState;
+
   // configs
   float lineWidth_;
   float lineAngle_;
@@ -34,10 +46,14 @@ private:
   int houghMaxLineGap_;
 
   // variables
-  CvImagePtr currentImage_;
+//  CvImagePtr currentImage_;
   std::vector<Line> currentGuess_;
   std::vector<Line> currentMiddleLine_;
   ImageOperator image_operator_;
+  int imgHeight_;
+#ifdef PUBLISH_DEBUG
+  cv::Mat debugImg_;
+#endif
 
   // communication
   image_transport::ImageTransport imageTransport_;
@@ -68,12 +84,20 @@ private:
 
   // methods
   void findLane();
+  void findLinesWithHough(CvImagePtr img, std::vector<Line> &houghLines);
+  bool findLanesFromStartbox(std::vector<Line> &lines); // called at the start to initialy find the lanes
+  bool findLaneSimple(std::vector<Line> &lines); // finds the lane assuming there are no markings missing (e.g. for Parking area)
+  bool findLaneAdvanced(std::vector<Line> &lines); // finds the lane assuming some markings could be missing
+  bool findIntersectionExit(std::vector<Line> &lines); // find the end of an intersection (used while in intersection)
 
+  // helper functions
   float getDistanceBetweenPoints(const cv::Point2f a, const cv::Point2f b) {
     auto dX = a.x - b.x;
     auto dY = a.y - b.y;
     return sqrt(dX * dX + dY * dY);
   }
+
+  void buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, std::vector<cv::Point2f> &midLinePoints);
 
 public:
   LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);

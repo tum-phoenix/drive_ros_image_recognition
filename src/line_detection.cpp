@@ -13,6 +13,8 @@ namespace drive_ros_image_recognition {
 LineDetection::LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh)
   : nh_(nh)
   , pnh_(pnh)
+  , isObstaceCourse(false)
+  , driveState(DriveState::Street) // TODO: this should be StartBox in real conditions
   , imageTransport_(pnh)
   , lineWidth_(0.4)
   , image_operator_()
@@ -60,32 +62,54 @@ bool LineDetection::init() {
 /// \param imgIn the incoming camera image message.
 ///
 void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
-  currentImage_ = convertImageMessage(imgIn);
+  // TODO: so far these states are only for the free drive (w/o obstacles) and probably not even complete, yet
+  auto currentImage = convertImageMessage(imgIn);
+  imgHeight_ = currentImage->rows;
+  std::vector<Line> linesInImage;
+  findLinesWithHough(currentImage, linesInImage);
+  if(driveState == DriveState::StartBox) {
+//    findLanesFromStartbox(linesInImage);
+  } else if(driveState == DriveState::Street) {
+    findLaneAdvanced(linesInImage);
+  } else if(driveState == DriveState::Parking) {
+//    findLaneSimple(linesInImage);
+  } else if(driveState == DriveState::Intersection) {
+//    findIntersectionExit(linesInImage);
+  } else {
+      
+  }
+
+#ifdef PUBLISH_DEBUG
+    debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
+#endif
+
 //  auto t_start = std::chrono::high_resolution_clock::now();
-  findLane();
+//  findLane();
 //  auto t_end = std::chrono::high_resolution_clock::now();
 //  ROS_INFO_STREAM("Cycle time: " << (std::chrono::duration<double, std::milli>(t_end-t_start).count()) << "ms");
 }
 
 ///
-/// \brief LineDetection::findLane
-/// Uses the current image to find the street marking lanes.
+/// \brief LineDetection::findLinesWithHough
+/// Extract Lines from the image using Hough Lines
+/// \param img A CvImagePtr to the current image where we want to search for lines
+/// \param houghLines A std::vector where the Lines will be returned. Has to be empty.
 ///
-void LineDetection::findLane() {
+void LineDetection::findLinesWithHough(CvImagePtr img, std::vector<Line> &houghLines) {
   cv::Mat processingImg;
 #ifdef PUBLISH_DEBUG
-  cv::Mat outputImg;
-  cv::cvtColor(*currentImage_, outputImg, CV_GRAY2RGB);
+  cv::cvtColor(*img, debugImg_, CV_GRAY2RGB);
 #endif
 
   // Blur the image and find edges with Canny
-  cv::GaussianBlur(*currentImage_, processingImg, cv::Size(15, 15), 0, 0);
+  cv::GaussianBlur(*img, processingImg, cv::Size(15, 15), 0, 0);
   cv::Canny(processingImg, processingImg, cannyThreshold_, cannyThreshold_ * 3, 3);
 
   // Zero out the vehicle
   int imgWidth = processingImg.cols;
   int imgHeight = processingImg.rows;
   cv::Point vehiclePolygon[1][4];
+  // TODO: these factor should be in a config
   vehiclePolygon[0][0] = cv::Point(imgWidth * .35, imgHeight);
   vehiclePolygon[0][1] = cv::Point(imgWidth * .65, imgHeight);
   vehiclePolygon[0][2] = cv::Point(imgWidth * .65, imgHeight * .8);
@@ -96,7 +120,6 @@ void LineDetection::findLane() {
 
   // Get houghlines
   std::vector<cv::Vec4i> hLinePoints;
-  std::vector<Line> houghLines;
 
   cv::HoughLinesP(processingImg, hLinePoints, 1, CV_PI / 180, houghThresold_, houghMinLineLen_, houghMaxLineGap_);
 
@@ -109,15 +132,25 @@ void LineDetection::findLane() {
   }
   image_operator_.imageToWorld(imagePoints, worldPoints);
 
-  // Build lines from points
+  // Build lines from points to return them
   for(size_t i = 0; i < worldPoints.size(); i += 2) {
     houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
   }
 
+  return;
+}
+
+///
+/// \brief LineDetection::findLaneAdvanced
+/// In this scenario lines can be missing, we could have a double middle line, intersection lines,
+/// and the start line could occur.
+/// \param lines
+/// \return
+///
+bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
   // Create a static guess, in case we do not have on from the previous frame
   // todo: we should only do this, when the car starts in the start box. Otherwise we can get in trouble
-  worldPoints.clear();
-  imagePoints.clear();
+  std::vector<cv::Point2f> imagePoints, worldPoints;
   if(currentGuess_.empty()) {
     // todo: we should have a state like "LOST_LINE", where we try to find the middle line again (more checks, if it is really the middle one)
     worldPoints.push_back(cv::Point2f(0.24, 0.5));
@@ -132,13 +165,13 @@ void LineDetection::findLane() {
 #ifdef PUBLISH_DEBUG
   // Draw our guess (in blue)
   for(size_t i = 0; i < currentGuess_.size(); i++) {
-    cv::line(outputImg, currentGuess_.at(i).iP1_, currentGuess_.at(i).iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+    cv::line(debugImg_, currentGuess_.at(i).iP1_, currentGuess_.at(i).iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
   }
 #endif
 
   // Use the guess to classify the lines
-  std::vector<Line> leftLine, middleLine, rightLine;
-  for(Line sl : houghLines) {
+  std::vector<Line> leftLines, middleLines, rightLines, horizontalLines;
+  for(Line sl : lines) {
     Line segment = currentGuess_.at(0);
       bool isInSegment = false;
       // find the corresponding segment
@@ -162,116 +195,49 @@ void LineDetection::findLane() {
           // the current approach leads to problems in curves
           auto absDistanceToMidLine = std::abs(sl.wMid_.y - segment.wMid_.y);
           if(absDistanceToMidLine < (lineWidth_ / 2)) {
-            middleLine.push_back(sl);
+            middleLines.push_back(sl);
 #ifdef PUBLISH_DEBUG
-            cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
+            cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
 #endif
           } else if((sl.wMid_.y < segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
-            rightLine.push_back(sl);
+            rightLines.push_back(sl);
 #ifdef PUBLISH_DEBUG
-            cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
+            cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
 #endif
           } else if((sl.wMid_.y > segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
-            leftLine.push_back(sl);
+            leftLines.push_back(sl);
 #ifdef PUBLISH_DEBUG
-            cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
+            cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
 #endif
           }
         } else {
-          // todo: classify the line (stop, start, ...)
+            horizontalLines.push_back(sl);
 #ifdef PUBLISH_DEBUG
-          cv::line(outputImg, sl.iP1_, sl.iP2_, cv::Scalar(255, 255), 2, cv::LINE_AA);
+          cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(255, 255), 2, cv::LINE_AA);
 #endif
         }
       }
   }
 
-  if(middleLine.empty()) {
-    // todo: handle this better, e.g. use left and right lane and compute the middle lane if the distances are plausible
-    ROS_INFO_STREAM("no middle line found");
+  if(middleLines.empty()/* && leftLines.empty() && rightLines.empty()*/) {
+    // TODO: this should not happen. maybe set state to sth. like RECOVER
+    ROS_WARN_STREAM("No lane markings found");
     currentGuess_.clear();
-#ifdef PUBLISH_DEBUG
-    debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, outputImg).toImageMsg());
-#endif
-    return;
+    return false;
   }
 
-  // transform old line based on odometry
-  // todo: maybe we do not need this for now, since we have high frame rate and therefore the offset between frames is very small
-//  tf::StampedTransform transform;
-//  try{
-//    tfListener_.lookupTransform("/odometry", "/rear_axis_middle_ground", ros::Time(0), transform);
-//  }
-//  catch (tf::TransformException ex){
-//    ROS_ERROR("%s",ex.what());
-//    ros::Duration(1.0).sleep();
-//  }
-//  cv::Point2f newPoint(transform.getOrigin().x(), transform.getOrigin().y());
-//  //  auto xTransform = newPoint.x - oldPoint_.x;
-//  //  auto yTransform = newPoint.y - oldPoint_y;
-//  auto ptsDifference = newPoint - oldPoint_;
-//  ROS_INFO_STREAM(ptsDifference.x << "," << ptsDifference.y);
-//  if(ptsDifference.x != 0.0){
-//    oldPoint_ = newPoint;
-//    std::vector<cv::Point2f> oldTransformedLine;
-//    for(auto seg : currentLane_) {
-//      oldTransformedLine.push_back(cv::Point2f(seg.wP1_ + ptsDifference));
-//      oldTransformedLine.push_back(cv::Point2f(seg.wP2_ + ptsDifference));
-//    }
-
-
-//    imagePoints.clear();
-//    image_operator_.worldToImage(oldTransformedLine, imagePoints);
-//    for(auto i = 1; i < (imagePoints.size() - 1); i++)
-//      cv::line(outputImg, imagePoints.at(i - 1), imagePoints.at(i), cv::Scalar(255,255), 2);
-//    for(auto i = 0; i < currentLane_.size(); i++) {
-//      auto p1 = imagePoints.at(i * 2);
-//      auto p2 = imagePoints.at((i * 2) + 1);
-//      cv::circle(outputImg, currentLane_.at(i).iP1_, 5, cv::Scalar(124,124), 3);
-//      cv::circle(outputImg, p1, 5, cv::Scalar(255,255), 3);
-//      cv::line(outputImg, currentLane_.at(i).iP1_, p1, cv::Scalar(124,124), 2);
-//      cv::circle(outputImg, currentLane_.at(i).iP2_, 5, cv::Scalar(124,124), 3);
-//      cv::circle(outputImg, p2, 5, cv::Scalar(255,255), 3);
-//      cv::line(outputImg, currentLane_.at(i).iP2_, p2, cv::Scalar(124,124), 2);
-//    }
-//  }
-
-  // middle line is 0.2m long and then interrupted for 0.2m
-  // todo: in the extendes cup we can have double middle lines -> find a solution to this
-  // todo: this should be checked
+  // TODO: find a better and more efficient way to do this. maybe also project left and right line into middle to use all points.
+  // in the free drive event, double lines are treated as normal dashed lines
   // sort our middle lines based on wP1_.x of line
-  std::sort(middleLine.begin(), middleLine.end(), [](Line &a, Line &b){ return a.wP1_.x < b.wP1_.x; });
+  std::sort(middleLines.begin(), middleLines.end(), [](Line &a, Line &b){ return a.wP1_.x < b.wP1_.x; });
   // build bounding boxes around group of lines, where lines in group are closer than 0.25m to each other
-  float currentMinX = middleLine.at(0).wP1_.x;
+  float currentMinX = middleLines.at(0).wP1_.x;
   std::vector<cv::Point2f> cPts, newMidLinePts;
-  for(auto l : middleLine) {
+  for(auto l : middleLines) {
     if(l.wP1_.x > (currentMinX + 0.25)) {
-      auto rect = cv::minAreaRect(cPts);
-      cv::Point2f a, b;
-      cv::Point2f vertices2f[4];
-      rect.points(vertices2f);
-
-      currentMinX = l.wP1_.x;
-
-      // todo: this should be in a function, since we are using it again after the for loop
-      // use the long side as line
-      if(std::abs(vertices2f[0].x - vertices2f[1].x) > std::abs(vertices2f[1].x - vertices2f[2].x)) {
-        a = vertices2f[0];
-        b = vertices2f[1];
-      } else {
-        a = vertices2f[1];
-        b = vertices2f[2];
-      }
-      // ensures the correct order of the points in newMidLinePts vector
-      if(a.x > b.x) {
-        newMidLinePts.push_back(b);
-        newMidLinePts.push_back(a);
-      } else {
-        newMidLinePts.push_back(a);
-        newMidLinePts.push_back(b);
-      }
-
+      buildBbAroundLines(cPts, newMidLinePts);
       cPts.clear();
+      currentMinX = l.wP1_.x;
     }
     cPts.push_back(l.wP1_);
     cPts.push_back(l.wP2_);
@@ -279,27 +245,7 @@ void LineDetection::findLane() {
 
   // finish the bounding box building step
   if(!cPts.empty()) {
-    auto rect = cv::minAreaRect(cPts);
-    cv::Point2f vertices2f[4];
-    rect.points(vertices2f);
-    cv::Point2f a, b;
-
-    // use the long side as line
-    if(std::abs(vertices2f[0].x - vertices2f[1].x) > std::abs(vertices2f[1].x - vertices2f[2].x)) {
-      a = vertices2f[0];
-      b = vertices2f[1];
-    } else {
-      a = vertices2f[1];
-      b = vertices2f[2];
-    }
-    // ensures the right order of the points in newMidLinePts vector
-    if(a.x > b.x) {
-      newMidLinePts.push_back(b);
-      newMidLinePts.push_back(a);
-    } else {
-      newMidLinePts.push_back(a);
-      newMidLinePts.push_back(b);
-    }
+    buildBbAroundLines(cPts, newMidLinePts);
   }
 
   // build the middle line from out points
@@ -318,7 +264,7 @@ void LineDetection::findLane() {
   wPt2 = newMidLinePts.at(1);
   dir = wPt2 - wPt1;
   dirLen = sqrt(dir.x * dir.x + dir.y * dir.y);
-  // the image starts 0.24m from the rear_axis_middle_ground. todo: sould be in config
+  // the image starts 0.24m from the rear_axis_middle_ground. TODO: sould be in config
   auto distToImageBoundary = wPt1.x - 0.24;
   if(distToImageBoundary > 0.1) { // distance is positive
     // dir, distToImageBoundary, dirLen are all positive
@@ -338,10 +284,10 @@ void LineDetection::findLane() {
     auto a = imagePoints.at(i - 1);
     auto b = imagePoints.at(i);
     // this makes the line coordinates inconsistant, but this should not be a serious problem
-    if(a.y > imgHeight)
-      a.y = imgHeight - 1;
-    if(b.y > imgHeight)
-      b.y = imgHeight - 1;
+    if(a.y > imgHeight_)
+      a.y = imgHeight_ - 1;
+    if(b.y > imgHeight_)
+      b.y = imgHeight_ - 1;
 
     currentGuess_.push_back(Line(a, b, newMidLinePts.at(i - 1), newMidLinePts.at(i)));
   }
@@ -349,10 +295,10 @@ void LineDetection::findLane() {
   // validate our new guess
   if(!currentGuess_.empty()) {
     if(currentGuess_.at(currentGuess_.size() - 1).wP2_.x < 0.5) {
-      // our guess is too short, it is better to use the default one
+      // our guess is too short, it is better to use the default one; TODO: bad idea -> RECOVER state
       currentGuess_.clear();
     } else if((currentGuess_.at(0).getAngle() < 1.0) || (currentGuess_.at(0).getAngle() > 2.6)) {
-      // the angle of the first segment is weird (probably a workaround for now, why can this happen?)
+      // the angle of the first segment is weird (TODO: workaround for now, why can this happen?)
       // if we have more than one segment, then we just delete the first
       if(currentGuess_.size() > 1) {
         currentGuess_.erase(currentGuess_.begin());
@@ -378,7 +324,7 @@ void LineDetection::findLane() {
       } else if((i < (currentGuess_.size() - 1)) && currentGuess_.at(i).getLength() > 0.3) {
         // if a segment is longer than 0.3m, the line is probably not dashed (so no middle line) todo: line does not have to be dashed
         // excluding the last segment, since we created this for searching forward
-        ROS_INFO_STREAM("clipped line because of length");
+//        ROS_INFO_STREAM("clipped line because of length");
         currentGuess_.erase(currentGuess_.begin() + i, currentGuess_.end());
         done = true;
       }
@@ -390,18 +336,13 @@ void LineDetection::findLane() {
 #ifdef PUBLISH_DEBUG
     // draw our middle line (yellow)
     for(auto l : currentMiddleLine_) {
-      cv::line(outputImg, l.iP1_, l.iP2_, cv::Scalar(255,0,255), 2, cv::LINE_AA);
+      cv::line(debugImg_, l.iP1_, l.iP2_, cv::Scalar(255,0,255), 2, cv::LINE_AA);
     }
 #endif
   }
 
-  // todo: move old guess with odometry and compare old and new guess
-
-#ifdef PUBLISH_DEBUG
-  debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, outputImg).toImageMsg());
-#endif
-
   // publish points to road topic
+  // TODO: we want to publish not only the middle line, but also start line, stop lines, intersections, barred areas, ...
   drive_ros_msgs::RoadLine msgMidLine;
   msgMidLine.lineType = drive_ros_msgs::RoadLine::MIDDLE;
   for(auto l : currentMiddleLine_) {
@@ -415,7 +356,30 @@ void LineDetection::findLane() {
   }
 
   line_output_pub_.publish(msgMidLine);
+}
 
+void LineDetection::buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, std::vector<cv::Point2f> &midLinePoints) {
+    auto rect = cv::minAreaRect(centerPoints);
+    cv::Point2f a, b;
+    cv::Point2f vertices2f[4];
+    rect.points(vertices2f);
+
+    // use the long side as line
+    if(std::abs(vertices2f[0].x - vertices2f[1].x) > std::abs(vertices2f[1].x - vertices2f[2].x)) {
+      a = vertices2f[0];
+      b = vertices2f[1];
+    } else {
+      a = vertices2f[1];
+      b = vertices2f[2];
+    }
+    // ensures the correct order of the points in newMidLinePts vector
+    if(a.x > b.x) {
+      midLinePoints.push_back(b);
+      midLinePoints.push_back(a);
+    } else {
+      midLinePoints.push_back(a);
+      midLinePoints.push_back(b);
+    }
 }
 
 ///
