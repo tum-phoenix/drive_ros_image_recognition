@@ -15,6 +15,8 @@
 #include "drive_ros_msgs/RoadLane.h"
 #include "line.h"
 
+#define GUESS_RESOLUTION = 0.2
+
 namespace drive_ros_image_recognition {
 
 class LineDetection {
@@ -47,10 +49,11 @@ private:
 
   // variables
 //  CvImagePtr currentImage_;
-  std::vector<Line> currentGuess_;
+//  std::vector<Line> currentGuess_;
   std::vector<Line> currentMiddleLine_;
   ImageOperator image_operator_;
   int imgHeight_;
+  int imgWidth_;
 #ifdef PUBLISH_DEBUG
   cv::Mat debugImg_;
 #endif
@@ -97,7 +100,12 @@ private:
     return sqrt(dX * dX + dY * dY);
   }
 
+  void classifyHorizontalLine(Line &line, float worldDistToMiddleLine);
   void buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, std::vector<cv::Point2f> &midLinePoints);
+
+#ifdef PUBLISH_DEBUG
+  void drawAndPublishDebugLines(std::vector<Line> &lines);
+#endif
 
 public:
   LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh);

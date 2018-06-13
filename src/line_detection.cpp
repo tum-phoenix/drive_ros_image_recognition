@@ -65,6 +65,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
   // TODO: so far these states are only for the free drive (w/o obstacles) and probably not even complete, yet
   auto currentImage = convertImageMessage(imgIn);
   imgHeight_ = currentImage->rows;
+  imgWidth_ = currentImage->cols;
   std::vector<Line> linesInImage;
   findLinesWithHough(currentImage, linesInImage);
   if(driveState == DriveState::StartBox) {
@@ -134,7 +135,7 @@ void LineDetection::findLinesWithHough(CvImagePtr img, std::vector<Line> &houghL
 
   // Build lines from points to return them
   for(size_t i = 0; i < worldPoints.size(); i += 2) {
-    houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
+    houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1), Line::LineType::UNKNOWN));
   }
 
   return;
@@ -148,26 +149,30 @@ void LineDetection::findLinesWithHough(CvImagePtr img, std::vector<Line> &houghL
 /// \return
 ///
 bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
-  // Create a static guess, in case we do not have on from the previous frame
+  // Last frames middle line is our new guess. Clear old middle line
+  std::vector<Line> currentGuess_;
+  if(!currentMiddleLine_.empty()) {
+      for(auto l : currentMiddleLine_) {
+          l.lineType_ = Line::LineType::GUESS;
+          currentGuess_.push_back(l);
+      }
+      currentMiddleLine_.clear();
+  }
+
   // todo: we should only do this, when the car starts in the start box. Otherwise we can get in trouble
   std::vector<cv::Point2f> imagePoints, worldPoints;
   if(currentGuess_.empty()) {
-    // todo: we should have a state like "LOST_LINE", where we try to find the middle line again (more checks, if it is really the middle one)
+    // todo: we should have a state like "RECOVER", where we try to find the middle line again (more checks, if it is really the middle one)
     worldPoints.push_back(cv::Point2f(0.24, 0.5));
     worldPoints.push_back(cv::Point2f(0.4, 0.5));
     worldPoints.push_back(cv::Point2f(0.55, 0.5));
     worldPoints.push_back(cv::Point2f(0.70, 0.5));
     image_operator_.worldToImage(worldPoints, imagePoints);
     for(size_t i = 1; i < imagePoints.size(); i++)
-      currentGuess_.push_back(Line(imagePoints.at(i - 1), imagePoints.at(i), worldPoints.at(i - 1), worldPoints.at(i)));
+      currentGuess_.push_back(Line(imagePoints.at(i - 1), imagePoints.at(i), worldPoints.at(i - 1), worldPoints.at(i), Line::LineType::GUESS));
   }
 
-#ifdef PUBLISH_DEBUG
-  // Draw our guess (in blue)
-  for(size_t i = 0; i < currentGuess_.size(); i++) {
-    cv::line(debugImg_, currentGuess_.at(i).iP1_, currentGuess_.at(i).iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-  }
-#endif
+  drawAndPublishDebugLines(currentGuess_);
 
   // Use the guess to classify the lines
   std::vector<Line> leftLines, middleLines, rightLines, horizontalLines;
@@ -195,34 +200,63 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
           // the current approach leads to problems in curves
           auto absDistanceToMidLine = std::abs(sl.wMid_.y - segment.wMid_.y);
           if(absDistanceToMidLine < (lineWidth_ / 2)) {
+            sl.lineType_ = Line::LineType::MIDDLE_LINE;
             middleLines.push_back(sl);
-#ifdef PUBLISH_DEBUG
-            cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
-#endif
           } else if((sl.wMid_.y < segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
+            sl.lineType_ = Line::LineType::RIGHT_LINE;
             rightLines.push_back(sl);
-#ifdef PUBLISH_DEBUG
-            cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
-#endif
           } else if((sl.wMid_.y > segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
+            sl.lineType_ = Line::LineType::LEFT_LINE;
             leftLines.push_back(sl);
-#ifdef PUBLISH_DEBUG
-            cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(255), 2, cv::LINE_AA);
-#endif
           }
         } else {
+            classifyHorizontalLine(sl, segment.wMid_.y - sl.wMid_.y);
             horizontalLines.push_back(sl);
-#ifdef PUBLISH_DEBUG
-          cv::line(debugImg_, sl.iP1_, sl.iP2_, cv::Scalar(255, 255), 2, cv::LINE_AA);
-#endif
         }
       }
   }
 
+  // Classify the horizontal lines
+  // Find start line
+  // TODO: check if we have lines on left and right lane. in this case, set all left and right ones (in a certain x-interval to start line)
+  for(auto firstIt = horizontalLines.begin(); firstIt != horizontalLines.end(); ++firstIt) {
+      for(auto secondIt = horizontalLines.begin(); secondIt != horizontalLines.end(); ++secondIt) {
+          if(((firstIt->lineType_ == Line::LineType::HORIZONTAL_LEFT_LANE) && (secondIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE)) ||
+                  ((firstIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE) && (secondIt->lineType_ == Line::LineType::HORIZONTAL_LEFT_LANE))) {
+              if(abs(firstIt->wMid_.x - secondIt->wMid_.x) < 0.2) {
+                  firstIt->lineType_ = Line::LineType::START_LINE;
+                  secondIt->lineType_ = Line::LineType::START_LINE;
+              }
+          }
+      }
+  }
+  // Find stop line
+  for(auto firstIt = horizontalLines.begin(); firstIt != horizontalLines.end(); ++firstIt) {
+      if(firstIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE) {
+          bool foundRightOuterBound = false, foundLeftOuterBound = false;
+          for(auto secondIt = horizontalLines.begin(); secondIt != horizontalLines.end(); ++secondIt) {
+              if(secondIt->lineType_ == Line::LineType::HORIZONTAL_OUTER_LEFT)
+                  foundLeftOuterBound = true;
+              else if(secondIt->lineType_ == Line::LineType::HORIZONTAL_OUTER_RIGHT)
+                  foundRightOuterBound = true;
+          }
+          if(foundLeftOuterBound && foundRightOuterBound) {
+              firstIt->lineType_ = Line::LineType::STOP_LINE;
+//              ROS_INFO_STREAM("Found a stop line");
+          }
+      }
+  }
+
+#ifdef PUBLISH_DEBUG
+//  drawAndPublishDebugLines(middleLines);
+  drawAndPublishDebugLines(rightLines);
+  drawAndPublishDebugLines(leftLines);
+  drawAndPublishDebugLines(horizontalLines);
+#endif
+
   if(middleLines.empty()/* && leftLines.empty() && rightLines.empty()*/) {
     // TODO: this should not happen. maybe set state to sth. like RECOVER
-    ROS_WARN_STREAM("No lane markings found");
-    currentGuess_.clear();
+    ROS_WARN_STREAM("No middle line found");
     return false;
   }
 
@@ -278,8 +312,8 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
   // convert points
   imagePoints.clear();
   image_operator_.worldToImage(newMidLinePts, imagePoints);
-  // create new guess and middle line
-  currentGuess_.clear();
+  // create the new middle line
+  currentMiddleLine_.clear();
   for(size_t i = 1; i < imagePoints.size(); i++) {
     auto a = imagePoints.at(i - 1);
     auto b = imagePoints.at(i);
@@ -289,57 +323,50 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
     if(b.y > imgHeight_)
       b.y = imgHeight_ - 1;
 
-    currentGuess_.push_back(Line(a, b, newMidLinePts.at(i - 1), newMidLinePts.at(i)));
+    currentMiddleLine_.push_back(Line(a, b, newMidLinePts.at(i - 1), newMidLinePts.at(i), Line::LineType::MIDDLE_LINE));
   }
 
   // validate our new guess
-  if(!currentGuess_.empty()) {
-    if(currentGuess_.at(currentGuess_.size() - 1).wP2_.x < 0.5) {
+  if(!currentMiddleLine_.empty()) {
+    if(currentMiddleLine_.at(currentMiddleLine_.size() - 1).wP2_.x < 0.5) {
       // our guess is too short, it is better to use the default one; TODO: bad idea -> RECOVER state
-      currentGuess_.clear();
-    } else if((currentGuess_.at(0).getAngle() < 1.0) || (currentGuess_.at(0).getAngle() > 2.6)) {
+      currentMiddleLine_.clear();
+    } else if((currentMiddleLine_.at(0).getAngle() < 1.0) || (currentMiddleLine_.at(0).getAngle() > 2.6)) {
       // the angle of the first segment is weird (TODO: workaround for now, why can this happen?)
       // if we have more than one segment, then we just delete the first
-      if(currentGuess_.size() > 1) {
-        currentGuess_.erase(currentGuess_.begin());
+      if(currentMiddleLine_.size() > 1) {
+        currentMiddleLine_.erase(currentMiddleLine_.begin());
       } else {
         // otherwise throw the guess away
-        currentGuess_.clear();
+        currentMiddleLine_.clear();
       }
     }
 
     bool done = false;
-    for(size_t i = 1; i < currentGuess_.size() && !done; i++) {
+    for(size_t i = 1; i < currentMiddleLine_.size() && !done; i++) {
       // angles between two connected segments should be plausible
-      if(std::abs(currentGuess_.at(i - 1).getAngle() - currentGuess_.at(i).getAngle()) > 0.8) {
+      if(std::abs(currentMiddleLine_.at(i - 1).getAngle() - currentMiddleLine_.at(i).getAngle()) > 0.8) {
         // 0.8 = 45 degree
         // todo: clear whole line or just to this segment?
-        currentGuess_.erase(currentGuess_.begin() + i, currentGuess_.end());
+        currentMiddleLine_.erase(currentMiddleLine_.begin() + i, currentMiddleLine_.end());
 //        ROS_INFO_STREAM("clipped line because of angle difference");
         done = true;
-      } else if(currentGuess_.at(i).wP2_.x > maxViewRange_) {
+      } else if(currentMiddleLine_.at(i).wP2_.x > maxViewRange_) {
 //        ROS_INFO_STREAM("clipped line because of maxViewRange_");
-        currentGuess_.erase(currentGuess_.begin() + i, currentGuess_.end());
+        currentMiddleLine_.erase(currentMiddleLine_.begin() + i, currentMiddleLine_.end());
         done = true;
-      } else if((i < (currentGuess_.size() - 1)) && currentGuess_.at(i).getLength() > 0.3) {
-        // if a segment is longer than 0.3m, the line is probably not dashed (so no middle line) todo: line does not have to be dashed
+      }
+      else if((i < (currentMiddleLine_.size() - 1)) && currentMiddleLine_.at(i).getLength() > 0.3) {
+        // we build middle line segments of max 0.25m, so this is a test; TODO: overthink this
         // excluding the last segment, since we created this for searching forward
 //        ROS_INFO_STREAM("clipped line because of length");
-        currentGuess_.erase(currentGuess_.begin() + i, currentGuess_.end());
+        currentMiddleLine_.erase(currentMiddleLine_.begin() + i, currentMiddleLine_.end());
         done = true;
       }
     }
-
-    currentMiddleLine_.clear();
-    currentMiddleLine_.insert(currentMiddleLine_.begin(), currentGuess_.begin(), currentGuess_.end() - (done ? 0 : 1));
-
-#ifdef PUBLISH_DEBUG
-    // draw our middle line (yellow)
-    for(auto l : currentMiddleLine_) {
-      cv::line(debugImg_, l.iP1_, l.iP2_, cv::Scalar(255,0,255), 2, cv::LINE_AA);
-    }
-#endif
   }
+
+  drawAndPublishDebugLines(currentMiddleLine_);
 
   // publish points to road topic
   // TODO: we want to publish not only the middle line, but also start line, stop lines, intersections, barred areas, ...
@@ -356,6 +383,18 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
   }
 
   line_output_pub_.publish(msgMidLine);
+}
+
+void LineDetection::classifyHorizontalLine(Line &line, float worldDistToMiddleLine) {
+    if(worldDistToMiddleLine < -lineWidth_) {
+        line.lineType_ = Line::LineType::HORIZONTAL_OUTER_LEFT;
+    } else if(worldDistToMiddleLine < 0) {
+        line.lineType_ = Line::LineType::HORIZONTAL_LEFT_LANE;
+    } else if(worldDistToMiddleLine < lineWidth_) {
+        line.lineType_ = Line::LineType::HORIZONTAL_RIGHT_LANE;
+    } else {
+        line.lineType_ = Line::LineType::HORIZONTAL_OUTER_RIGHT;
+    }
 }
 
 void LineDetection::buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, std::vector<cv::Point2f> &midLinePoints) {
@@ -379,6 +418,27 @@ void LineDetection::buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, s
     } else {
       midLinePoints.push_back(a);
       midLinePoints.push_back(b);
+    }
+}
+
+void LineDetection::drawAndPublishDebugLines(std::vector<Line> &lines) {
+    for(auto it = lines.begin(); it != lines.end(); ++it) {
+        if(it->lineType_ == Line::LineType::MIDDLE_LINE)
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA); // Green
+        else if((it->lineType_ == Line::LineType::LEFT_LINE) || (it->lineType_ == Line::LineType::RIGHT_LINE))
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA); // Blue
+        else if(it->lineType_ == Line::LineType::STOP_LINE)
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255), 2, cv::LINE_AA); // Red
+        else if(it->lineType_ == Line::LineType::START_LINE)
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(0, 204, 255), 2, cv::LINE_AA); // Cyan
+        else if(it->lineType_ == Line::LineType::HORIZONTAL_OUTER_LEFT)
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255, 255), 2, cv::LINE_AA); // Yellow
+        else if(it->lineType_ == Line::LineType::HORIZONTAL_OUTER_RIGHT)
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255, 153, 51), 2, cv::LINE_AA); // Orange
+        else if(it->lineType_ == Line::LineType::GUESS)
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(153, 0, 204), 2, cv::LINE_AA); // Purple
+        else
+            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255, 51, 204), 2, cv::LINE_AA); // Pink
     }
 }
 

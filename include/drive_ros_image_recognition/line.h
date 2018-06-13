@@ -14,10 +14,26 @@ namespace drive_ros_image_recognition {
 ///
 class Line {
 public:
+    enum LineType {
+        UNKNOWN = 0,
+        LEFT_LINE = 1,
+        MIDDLE_LINE = 2,
+        RIGHT_LINE = 3,
+        HORIZONTAL_LEFT_LANE = 4,
+        HORIZONTAL_RIGHT_LANE = 5,
+        HORIZONTAL_OUTER_LEFT = 6,
+        HORIZONTAL_OUTER_RIGHT = 7,
+        STOP_LINE = 8,
+        START_LINE = 9,
+        GUESS = 10
+    };
+
   cv::Point iP1_, iP2_, iMid_;
   cv::Point2f wP1_, wP2_, wMid_;
+  LineType lineType_;
 
-  Line(cv::Point iP1, cv::Point iP2, cv::Point2f wP1, cv::Point2f wP2)
+  Line(cv::Point iP1, cv::Point iP2, cv::Point2f wP1, cv::Point2f wP2, LineType lineType)
+      : lineType_(lineType)
   {
     if(wP1.x < wP2.x) {
       iP1_ = iP1;
