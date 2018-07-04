@@ -75,7 +75,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
   } else if(driveState == DriveState::Parking) {
 //    findLaneSimple(linesInImage);
   } else if(driveState == DriveState::Intersection) {
-//    findIntersectionExit(linesInImage);
+    findLaneAdvanced(linesInImage);
   } else {
       
   }
@@ -150,39 +150,57 @@ void LineDetection::findLinesWithHough(CvImagePtr img, std::vector<Line> &houghL
 ///
 bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
   // Last frames middle line is our new guess. Clear old middle line
-  std::vector<Line> currentGuess_;
+  std::vector<Line> currentGuess;
   if(!currentMiddleLine_.empty()) {
-      for(auto l : currentMiddleLine_) {
-          l.lineType_ = Line::LineType::GUESS;
-          currentGuess_.push_back(l);
+      if(driveState == DriveState::Street) {
+          for(auto l : currentMiddleLine_) {
+              l.lineType_ = Line::LineType::GUESS;
+              currentGuess.push_back(l);
+          }
+          currentMiddleLine_.clear();
+      } else if(driveState == DriveState::Intersection) {
+          // TODO: as soon as we find the intersection, build lane based on middle and right lane and continue it
+          // or always have this available as a backup and use it whenever necessary
+          ROS_INFO_STREAM("currentMiddleLine_.size() = " << currentMiddleLine_.size());
+          auto startPt = lines.at(0).wP1_;
+          auto endPt = lines.at(lines.size() - 1).wP1_;
+          auto dir = endPt - startPt;
+          auto newEndPt = startPt + (dir * (2.0 / norm(dir)));
+          std::vector<cv::Point2f> imagePoints, worldPoints;
+          worldPoints.push_back(startPt);
+          worldPoints.push_back(newEndPt);
+          image_operator_.worldToImage(worldPoints, imagePoints);
+          currentMiddleLine_.clear();
+          auto l = Line(imagePoints.at(0), imagePoints.at(1), worldPoints.at(0), worldPoints.at(1), Line::LineType::GUESS);
+          currentGuess.push_back(l);
+          currentMiddleLine_.push_back(l);
       }
-      currentMiddleLine_.clear();
   }
 
   // todo: we should only do this, when the car starts in the start box. Otherwise we can get in trouble
   std::vector<cv::Point2f> imagePoints, worldPoints;
-  if(currentGuess_.empty()) {
+  if(currentGuess.empty()) {
     // todo: we should have a state like "RECOVER", where we try to find the middle line again (more checks, if it is really the middle one)
-    worldPoints.push_back(cv::Point2f(0.24, 0.5));
-    worldPoints.push_back(cv::Point2f(0.4, 0.5));
-    worldPoints.push_back(cv::Point2f(0.55, 0.5));
-    worldPoints.push_back(cv::Point2f(0.70, 0.5));
+    worldPoints.push_back(cv::Point2f(0.24, 0.15));
+    worldPoints.push_back(cv::Point2f(0.4,  0.15));
+    worldPoints.push_back(cv::Point2f(0.55, 0.15));
+    worldPoints.push_back(cv::Point2f(0.7,  0.15));
     image_operator_.worldToImage(worldPoints, imagePoints);
     for(size_t i = 1; i < imagePoints.size(); i++)
-      currentGuess_.push_back(Line(imagePoints.at(i - 1), imagePoints.at(i), worldPoints.at(i - 1), worldPoints.at(i), Line::LineType::GUESS));
+      currentGuess.push_back(Line(imagePoints.at(i - 1), imagePoints.at(i), worldPoints.at(i - 1), worldPoints.at(i), Line::LineType::GUESS));
   }
 
-  drawAndPublishDebugLines(currentGuess_);
+  drawAndPublishDebugLines(currentGuess);
 
   // Use the guess to classify the lines
   std::vector<Line> leftLines, middleLines, rightLines, horizontalLines;
   for(Line sl : lines) {
-    Line segment = currentGuess_.at(0);
+    Line segment = currentGuess.at(0);
       bool isInSegment = false;
       // find the corresponding segment
       // todo: this only uses the x-coordinate right now, improve this
-      for(size_t i = 0; (i < currentGuess_.size()) && !isInSegment; i++) {
-        segment = currentGuess_.at(i);
+      for(size_t i = 0; (i < currentGuess.size()) && !isInSegment; i++) {
+        segment = currentGuess.at(i);
         if(sl.wMid_.x > segment.wP1_.x) {
           if(sl.wMid_.x < segment.wP2_.x) {
             isInSegment = true;
@@ -210,7 +228,7 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
             leftLines.push_back(sl);
           }
         } else {
-            classifyHorizontalLine(sl, segment.wMid_.y - sl.wMid_.y);
+            classifyHorizontalLine(sl, sl.wMid_.y - segment.wMid_.y);
             horizontalLines.push_back(sl);
         }
       }
@@ -231,9 +249,11 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
       }
   }
   // Find stop line
+  bool checkStopLineDist = false;
   for(auto firstIt = horizontalLines.begin(); firstIt != horizontalLines.end(); ++firstIt) {
       if(firstIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE) {
           bool foundRightOuterBound = false, foundLeftOuterBound = false;
+          // TODO: check is outer lines are on the same height as the candidate stop line
           for(auto secondIt = horizontalLines.begin(); secondIt != horizontalLines.end(); ++secondIt) {
               if(secondIt->lineType_ == Line::LineType::HORIZONTAL_OUTER_LEFT)
                   foundLeftOuterBound = true;
@@ -242,8 +262,40 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
           }
           if(foundLeftOuterBound && foundRightOuterBound) {
               firstIt->lineType_ = Line::LineType::STOP_LINE;
-//              ROS_INFO_STREAM("Found a stop line");
+              checkStopLineDist = true;
           }
+      }
+  }
+
+  // Search for intersection exit
+  if(driveState == DriveState::Intersection) {
+      if((middleLines.size() > 0) && (leftLines.size() > 0) && (rightLines.size() > 0)) {
+          driveState = DriveState::Street;
+      } else {
+          return true;
+      }
+  }
+
+  // Check if we want to switch to DriveState::Intersection
+  // TODO: improvement: check if all found stop lines are close to each other
+  if(checkStopLineDist) {
+//      ROS_INFO_STREAM("--------------- checkStopLineDist");
+      bool foundOuterLeft = false, foundOuterRight;
+      float distToStopLine = 10.0f;
+      for(auto it = horizontalLines.begin(); it != horizontalLines.end(); ++it) {
+        if(it->lineType_ == Line::LineType::HORIZONTAL_OUTER_LEFT)
+            foundOuterLeft = true;
+        else if(it->lineType_ == Line::LineType::HORIZONTAL_OUTER_RIGHT)
+            foundOuterRight = true;
+        else if(it->lineType_ == Line::LineType::STOP_LINE) {
+//            ROS_INFO_STREAM(it->wMid_.x << "," << it->wMid_.y);
+            distToStopLine = std::min(distToStopLine, it->wMid_.x);
+        }
+      }
+//      ROS_INFO_STREAM("Dist to intersection = " << distToStopLine);
+      if(foundOuterLeft && foundOuterRight && (distToStopLine < 0.4)) {
+          driveState = DriveState::Intersection;
+          ROS_INFO_STREAM("DriveState changed to Intersection");
       }
   }
 
@@ -253,6 +305,8 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
   drawAndPublishDebugLines(leftLines);
   drawAndPublishDebugLines(horizontalLines);
 #endif
+
+  // TODO: project left and right line into middle - cloud also help for intersections
 
   if(middleLines.empty()/* && leftLines.empty() && rightLines.empty()*/) {
     // TODO: this should not happen. maybe set state to sth. like RECOVER
@@ -386,14 +440,15 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
 }
 
 void LineDetection::classifyHorizontalLine(Line &line, float worldDistToMiddleLine) {
+    // remember the worlds origin is the vehicles rear_middle_axis and the x-axis increases to the left
     if(worldDistToMiddleLine < -lineWidth_) {
-        line.lineType_ = Line::LineType::HORIZONTAL_OUTER_LEFT;
-    } else if(worldDistToMiddleLine < 0) {
-        line.lineType_ = Line::LineType::HORIZONTAL_LEFT_LANE;
-    } else if(worldDistToMiddleLine < lineWidth_) {
-        line.lineType_ = Line::LineType::HORIZONTAL_RIGHT_LANE;
-    } else {
         line.lineType_ = Line::LineType::HORIZONTAL_OUTER_RIGHT;
+    } else if(worldDistToMiddleLine < 0) {
+        line.lineType_ = Line::LineType::HORIZONTAL_RIGHT_LANE;
+    } else if(worldDistToMiddleLine < lineWidth_) {
+        line.lineType_ = Line::LineType::HORIZONTAL_LEFT_LANE;
+    } else {
+        line.lineType_ = Line::LineType::HORIZONTAL_OUTER_LEFT;
     }
 }
 

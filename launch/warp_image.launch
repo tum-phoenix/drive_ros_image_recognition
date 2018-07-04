@@ -3,7 +3,7 @@
     <arg name="camera_info_topic" default="/camera/camera_info"/>
     <arg name="warped_image_topic" default="/warped_image"/>
     <arg name="undistort_out" default="/undistorted_image"/>
-    <arg name="homography_topic" default="/camera/camera_homog"/>
+    <arg name="homography_topic" default="/camera/camera_homography"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
