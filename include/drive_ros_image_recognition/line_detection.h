@@ -57,6 +57,7 @@ private:
 #ifdef PUBLISH_DEBUG
   cv::Mat debugImg_;
 #endif
+  int stopLineCount;
 
   // communication
   image_transport::ImageTransport imageTransport_;

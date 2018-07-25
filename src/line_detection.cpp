@@ -16,6 +16,7 @@ LineDetection::LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
   , isObstaceCourse(false)
   , driveState(DriveState::Street) // TODO: this should be StartBox in real conditions
   , imageTransport_(pnh)
+  , stopLineCount(0)
   , lineWidth_(0.4)
   , image_operator_()
   , dsrv_server_()
@@ -75,13 +76,17 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
   } else if(driveState == DriveState::Parking) {
 //    findLaneSimple(linesInImage);
   } else if(driveState == DriveState::Intersection) {
-//    findIntersectionExit(linesInImage);
+    findIntersectionExit(linesInImage);
   } else {
       
   }
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
+
+    cv::namedWindow("Debug Image", CV_WINDOW_NORMAL);
+    cv::imshow("Debug Image", debugImg_);
+    cv::waitKey(1);
 #endif
 
 //  auto t_start = std::chrono::high_resolution_clock::now();
@@ -121,7 +126,6 @@ void LineDetection::findLinesWithHough(CvImagePtr img, std::vector<Line> &houghL
 
   // Get houghlines
   std::vector<cv::Vec4i> hLinePoints;
-
   cv::HoughLinesP(processingImg, hLinePoints, 1, CV_PI / 180, houghThresold_, houghMinLineLen_, houghMaxLineGap_);
 
   // Extract points for houghLines and convert to world-coordinates
@@ -231,6 +235,7 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
       }
   }
   // Find stop line
+  std::vector<float> distsToStopLine;
   for(auto firstIt = horizontalLines.begin(); firstIt != horizontalLines.end(); ++firstIt) {
       if(firstIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE) {
           bool foundRightOuterBound = false, foundLeftOuterBound = false;
@@ -242,9 +247,23 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
           }
           if(foundLeftOuterBound && foundRightOuterBound) {
               firstIt->lineType_ = Line::LineType::STOP_LINE;
-//              ROS_INFO_STREAM("Found a stop line");
+              distsToStopLine.push_back(firstIt->wMid_.x);
           }
       }
+  }
+  if(distsToStopLine.size() > 2) {
+    auto avgDistToStopLine = std::accumulate(distsToStopLine.begin(), distsToStopLine.end(), 0.0f) / distsToStopLine.size();
+    ROS_INFO_STREAM("Found a stop line; distance to it = " << avgDistToStopLine);
+    stopLineCount++;
+    if(avgDistToStopLine <= 0.6f) { // TODO: magic number
+
+      if(stopLineCount > 5) {
+        driveState = DriveState::Intersection;
+      }
+      // todo: maybe return here? but do not forget to publish road points
+    }
+  } else {
+    stopLineCount = 0;
   }
 
 #ifdef PUBLISH_DEBUG
@@ -256,7 +275,6 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
 
   if(middleLines.empty()/* && leftLines.empty() && rightLines.empty()*/) {
     // TODO: this should not happen. maybe set state to sth. like RECOVER
-    ROS_WARN_STREAM("No middle line found");
     return false;
   }
 
@@ -370,6 +388,7 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
 
   // publish points to road topic
   // TODO: we want to publish not only the middle line, but also start line, stop lines, intersections, barred areas, ...
+  // todo: we should do this outside this function inside the imageCallback
   drive_ros_msgs::RoadLine msgMidLine;
   msgMidLine.lineType = drive_ros_msgs::RoadLine::MIDDLE;
   for(auto l : currentMiddleLine_) {
@@ -383,6 +402,35 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
   }
 
   line_output_pub_.publish(msgMidLine);
+}
+
+bool LineDetection::findIntersectionExit(std::vector<Line> &lines) {
+  drawAndPublishDebugLines(currentMiddleLine_);
+  std::vector<Line> potMidLines;
+
+  // we keep current current middle line
+  // todo: we should check if the middle line is plausible
+  ROS_INFO_STREAM("findIntersectionExit");
+  if(currentMiddleLine_.size() == 0) {
+    ROS_WARN("No middle line");
+    return false;
+  }
+  for(auto l : lines) {
+//    if(std::abs(l.wMid_.y - currentMiddleLine_.at(0).wMid_.y) < (lineWidth_ * 0.5)) {
+//      ROS_INFO_STREAM("  found potential new middle line");
+      if(std::abs(l.getAngle() - currentMiddleLine_.at(0).getAngle()) < (M_PI / 8)) {
+        ROS_INFO_STREAM("    angle is ok");
+        l.lineType_ = Line::LineType::MIDDLE_LINE;
+        potMidLines.push_back(l);
+      }
+//    }
+  }
+  // todo: group lines by areas (left, middle, right) to find our lane again
+  drawAndPublishDebugLines(potMidLines);
+
+  // todo: ideas: 1) detect opposite stop line as end of intersection
+  //              2) usu odometry and knowledge about intersection size (line_width * 2)
+  return true;
 }
 
 void LineDetection::classifyHorizontalLine(Line &line, float worldDistToMiddleLine) {
