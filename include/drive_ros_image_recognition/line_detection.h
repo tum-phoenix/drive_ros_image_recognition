@@ -57,6 +57,7 @@ private:
 #ifdef PUBLISH_DEBUG
   cv::Mat debugImg_;
 #endif
+  int stopLineCount;
 
   // communication
   image_transport::ImageTransport imageTransport_;
@@ -100,11 +101,12 @@ private:
     return sqrt(dX * dX + dY * dY);
   }
 
-  void classifyHorizontalLine(Line &line, float worldDistToMiddleLine);
+  void determineLineTypes(std::vector<Line> &lines, std::vector<Line> &currentGuess);
+  void classifyHorizontalLine(Line *line, float worldDistToMiddleLine);
   void buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, std::vector<cv::Point2f> &midLinePoints);
 
 #ifdef PUBLISH_DEBUG
-  void drawAndPublishDebugLines(std::vector<Line> &lines);
+  void publishDebugLines(std::vector<Line> &lines);
 #endif
 
 public:
