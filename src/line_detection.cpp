@@ -4,9 +4,35 @@
 #include <vector>
 #include <chrono>
 #include <pluginlib/class_list_macros.h>
+#include <eigen3/Eigen/Dense>
 #include "drive_ros_image_recognition/line_detection.h"
 #include "drive_ros_image_recognition/geometry_common.h"
 #include "drive_ros_msgs/RoadLine.h"
+
+// TODO: if we use this, we have to cite it: https://github.com/kipr/opencv/blob/master/modules/contrib/src/polyfit.cpp
+void polyfit(const cv::Mat& src_x, const cv::Mat& src_y, cv::Mat& dst, int order)
+{
+    CV_Assert((src_x.rows>0)&&(src_y.rows>0)&&(src_x.cols==1)&&(src_y.cols==1)
+            &&(dst.cols==1)&&(dst.rows==(order+1))&&(order>=1));
+    cv::Mat X;
+    X = cv::Mat::zeros(src_x.rows, order+1,CV_32FC1);
+    cv::Mat copy;
+    for(int i = 0; i <=order;i++)
+    {
+        copy = src_x.clone();
+        cv::pow(copy,i,copy);
+        cv::Mat M1 = X.col(i);
+        copy.col(0).copyTo(M1);
+    }
+    cv::Mat X_t, X_inv;
+    transpose(X,X_t);
+    cv::Mat temp = X_t*X;
+    cv::Mat temp2;
+    invert (temp,temp2);
+    cv::Mat temp3 = temp2*X_t;
+    cv::Mat W = temp3*src_y;
+    W.copyTo(dst);
+}
 
 namespace drive_ros_image_recognition {
 
@@ -165,11 +191,12 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
     // todo: we should only do this, when the car starts in the start box. Otherwise we can get in trouble
     std::vector<cv::Point2f> imagePoints, worldPoints;
     if(currentGuess.empty()) {
+        ROS_WARN("Dummy guess");
         // todo: we should have a state like "RECOVER", where we try to find the middle line again (more checks, if it is really the middle one)
-        worldPoints.push_back(cv::Point2f(0.24, 0.5));
-        worldPoints.push_back(cv::Point2f(0.4, 0.5));
-        worldPoints.push_back(cv::Point2f(0.55, 0.5));
-        worldPoints.push_back(cv::Point2f(0.70, 0.5));
+        worldPoints.push_back(cv::Point2f(0.24, 0.2));
+        worldPoints.push_back(cv::Point2f(0.4, 0.2));
+        worldPoints.push_back(cv::Point2f(0.55, 0.2));
+        worldPoints.push_back(cv::Point2f(0.70, 0.2));
         image_operator_.worldToImage(worldPoints, imagePoints);
         for(size_t i = 1; i < imagePoints.size(); i++)
             currentGuess.push_back(Line(imagePoints.at(i - 1), imagePoints.at(i), worldPoints.at(i - 1), worldPoints.at(i), Line::LineType::GUESS));
@@ -248,9 +275,77 @@ bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
     publishDebugLines(horizontalLines);
 #endif
 
-    if(middleLines.empty()/* && leftLines.empty() && rightLines.empty()*/) {
-        // TODO: this should not happen. maybe set state to sth. like RECOVER
-        return false;
+    if(middleLines.empty()) {
+        // this can happen when approach an intersection without a stop line
+        ROS_INFO("------------- no middle line found");
+        worldPoints.clear();
+        imagePoints.clear();
+        for(auto l : rightLines) {
+            // perpendiculare vector
+            Eigen::Vector2f vec(-(l.wP2_.y - l.wP1_.y),
+                                (l.wP2_.x - l.wP1_.x));
+            vec.normalize();
+            vec *= lineWidth_;
+            worldPoints.push_back(cv::Point2f(l.wP1_.x + vec(0), l.wP1_.y + vec(1)));
+            worldPoints.push_back(cv::Point2f(l.wP2_.x + vec(0), l.wP2_.y + vec(1)));
+//            ROS_INFO_STREAM("Moved (" << l.wP1_.x << "," << l.wP1_.y << ") to (" << (l.wP1_.x + vec(0)) << "," << (l.wP1_.y + vec(1)) << ")");
+        }
+        for(auto l : leftLines) {
+            // perpendiculare vector
+            Eigen::Vector2f vec((l.wP2_.y - l.wP1_.y),
+                                -(l.wP2_.x - l.wP1_.x));
+            vec.normalize();
+            vec *= lineWidth_;
+            worldPoints.push_back(cv::Point2f(l.wP1_.x + vec(0), l.wP1_.y + vec(1)));
+            worldPoints.push_back(cv::Point2f(l.wP2_.x + vec(0), l.wP2_.y + vec(1)));
+//            ROS_INFO_STREAM("Moved (" << l.wP1_.x << "," << l.wP1_.y << ") to (" << (l.wP1_.x + vec(0)) << "," << (l.wP1_.y + vec(1)) << ")");
+        }
+
+        if(worldPoints.empty())
+            return false;
+
+        int order = 1;
+        cv::Mat srcX(worldPoints.size(), 1, CV_32FC1);
+        cv::Mat srcY(worldPoints.size(), 1, CV_32FC1);
+//        (src_x.rows>0)&&(src_y.rows>0)&&(src_x.cols==1)
+//        (src_y.cols==1)
+//        (dst.cols==1)&&(dst.rows==(order+1))&&(order>=1)
+        cv::Mat dst(order+1, 1, CV_32FC1);
+
+
+//        image_operator_.worldToImage(worldPoints, imagePoints);
+        for(int i = 0; i < worldPoints.size(); i += 2) {
+//            middleLines.push_back(Line(imagePoints.at(i), imagePoints.at(i+1), worldPoints.at(i), worldPoints.at(i+1), Line::LineType::MIDDLE_LINE));
+            srcX.at<float>(i, 0) = worldPoints.at(i).x;
+            srcX.at<float>(i+1, 0) = worldPoints.at(i+1).x;
+            srcY.at<float>(i, 0) = worldPoints.at(i).y;
+            srcY.at<float>(i+1, 0) = worldPoints.at(i+1).y;
+        }
+
+        ROS_INFO_STREAM("srcX dims = " << srcX.size << "; srcY dims = " << srcY.size << "; dst dims = " << dst.size);
+        polyfit(srcX, srcY, dst, order);
+        ROS_INFO_STREAM("PolyFit = " << dst);
+
+        worldPoints.clear();
+        auto a = dst.at<float>(0,0);
+        auto b = dst.at<float>(1,0);
+
+        for(int i = 1; i < 8; i++) {
+            auto x = i * 0.3;
+            worldPoints.push_back(cv::Point2f(x, a*x + b));
+        }
+
+        imagePoints.clear();
+        currentMiddleLine_.clear();
+        image_operator_.worldToImage(worldPoints, imagePoints);
+        for(int i = 1; i < worldPoints.size(); i++) {
+            currentMiddleLine_.push_back(Line(imagePoints.at(i-1), imagePoints.at(i), worldPoints.at(i-1), worldPoints.at(i), Line::LineType::MIDDLE_LINE));
+            ROS_INFO_STREAM("World line: (" << worldPoints.at(i-1).x << "," << worldPoints.at(i-1).y << ") - (" <<
+                            worldPoints.at(i).x << "," << worldPoints.at(i).y << ")");
+        }
+
+        publishDebugLines(currentMiddleLine_);
+        return true;
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------------
@@ -453,7 +548,7 @@ void LineDetection::determineLineTypes(std::vector<Line> &lines, std::vector<Lin
                 // todo: distance should be calculated based on orthogonal distance.
                 // the current approach leads to problems in curves
                 auto absDistanceToMidLine = std::abs(lineIt->wMid_.y - segment.wMid_.y);
-                if(absDistanceToMidLine < (lineWidth_ / 2)) {
+                if(absDistanceToMidLine < (lineWidth_ * 0.33)) {
                     lineIt->lineType_ = Line::LineType::MIDDLE_LINE;
                 } else if((lineIt->wMid_.y < segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
                     lineIt->lineType_ = Line::LineType::RIGHT_LINE;
