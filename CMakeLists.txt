@@ -37,6 +37,7 @@ generate_dynamic_reconfigure_options(
   cfg/CrossingDetection.cfg
   cfg/CrosswalkDetection.cfg
   cfg/SpeedMarkingDetection.cfg
+  cfg/LineDetection.cfg
 )
 
 catkin_package(
@@ -138,7 +139,7 @@ add_library(warp_image_nodelet
     src/warp_image.cpp
     )
 
-add_dependencies(warp_image_nodelet ${drive_ros_msgs_generate_messages_cpp} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(warp_image_nodelet ${PROJECT_NAME}_gencfg ${drive_ros_msgs_generate_messages_cpp} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(warp_image_nodelet
     ${catkin_LIBRARIES}
@@ -159,7 +160,7 @@ add_library(street_crossing_nodelet
     src/street_crossing.cpp
     )
 
-add_dependencies(street_crossing_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(street_crossing_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(street_crossing_nodelet
     ${catkin_LIBRARIES}
@@ -182,7 +183,7 @@ add_executable(street_crossing_node
     src/street_crossing_node.cpp
     )
 
-add_dependencies(street_crossing_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(street_crossing_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(street_crossing_node
     ${catkin_LIBRARIES}
@@ -204,7 +205,7 @@ add_library(crosswalk_detection_nodelet
     src/crosswalk_detection.cpp
     )
 
-add_dependencies(crosswalk_detection_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(crosswalk_detection_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(crosswalk_detection_nodelet
     ${catkin_LIBRARIES}
@@ -227,7 +228,7 @@ add_executable(crosswalk_detection_node
     src/crosswalk_detection_node.cpp
     )
 
-add_dependencies(crosswalk_detection_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(crosswalk_detection_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(crosswalk_detection_node
     ${catkin_LIBRARIES}
@@ -249,7 +250,7 @@ add_library(speed_marking_detection_nodelet
     src/speed_marking_detection.cpp
     )
 
-add_dependencies(speed_marking_detection_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(speed_marking_detection_nodelet ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(speed_marking_detection_nodelet
     ${catkin_LIBRARIES}
@@ -270,7 +271,7 @@ add_executable(speed_marking_detection_node
     src/speed_marking_detection_node.cpp
     )
 
-add_dependencies(speed_marking_detection_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(speed_marking_detection_node ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(speed_marking_detection_node
     ${catkin_LIBRARIES}
@@ -290,7 +291,7 @@ add_executable(publish_road
     src/publish_road.cpp
     )
 
-add_dependencies(publish_road ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(publish_road ${PROJECT_NAME}_gencfg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(publish_road
     ${catkin_LIBRARIES}
