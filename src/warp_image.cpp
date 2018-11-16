@@ -21,7 +21,8 @@ WarpContent::WarpContent(const ros::NodeHandle& nh, const ros::NodeHandle& pnh):
   scaling_mat_(3,3,CV_64FC1,cv::Scalar(0.0)),
   scaling_mat_inv_(3,3,CV_64FC1,cv::Scalar(0.0)),
   transformed_size_(0,0),
-  homo_received_(false)
+  homo_received_(false),
+  output_image_type_(CV_8UC1)
 {
   img_pub_ = it_.advertise("warped_out", 1);
   undistort_pub_ = it_.advertise("undistort_out", 1);
@@ -46,6 +47,9 @@ bool WarpContent::init() {
     ROS_ERROR("Unable to load parameter image_size!");
     return false;
   }
+  if(!pnh_.getParam("output_image_type", output_image_type_))
+    ROS_INFO_STREAM("Unable to load parameter output_image_type, using default "<<output_image_type_);
+
   ROS_ASSERT(image_size.size() == 2);
   transformed_size_ = cv::Size(image_size[0],image_size[1]);
   scaling_mat_init_.at<double>(0,0) = world_size[0]/image_size[0];
@@ -86,7 +90,16 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
   // undistort and apply homography transformation
   cv::Mat undistorted_mat;
   cv::undistort(current_image_, undistorted_mat, cam_model_.fullIntrinsicMatrix(), cam_model_.distortionCoeffs());
-  undistort_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, undistorted_mat).toImageMsg());
+  if (output_image_type_ == CV_8UC3)
+    cv::cvtColor(undistorted_mat, undistorted_mat, CV_GRAY2BGR);
+  else
+    ROS_INFO_STREAM("Unsupported output image type "<<output_image_type_<<" using default: "<<CV_8UC1<<" instead");
+  std::string output_encoding_str = sensor_msgs::image_encodings::TYPE_8UC1;
+  if (output_image_type_ == CV_8UC3)
+    output_encoding_str = sensor_msgs::image_encodings::BGR8;
+
+  undistort_pub_.publish(cv_bridge::CvImage(msg->header, output_encoding_str,
+                                            undistorted_mat).toImageMsg());
 
 //  cv::Mat topView2cam = world2cam_ * pixels_to_meters;
 
@@ -98,7 +111,8 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
   cv::imshow("Homographied",output_mat);
   cv::waitKey(1);
 #endif
-  img_pub_.publish(cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::TYPE_8UC1, output_mat).toImageMsg());
+
+  img_pub_.publish(cv_bridge::CvImage(msg->header, output_encoding_str, output_mat).toImageMsg());
 }
 
 void WarpImageNodelet::onInit()

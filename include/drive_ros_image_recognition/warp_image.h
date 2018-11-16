@@ -46,6 +46,7 @@ private:
   cv::Mat scaling_mat_inv_;
   cv::Size transformed_size_;
   bool homo_received_;
+  int output_image_type_;
 };
 
 class WarpImageNodelet : public nodelet::Nodelet {
