@@ -48,7 +48,7 @@ include_directories(
     ${catkin_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
-    )
+)
 
 ################################################################################
 # Warp image node
@@ -98,6 +98,7 @@ install(TARGETS warp_image_nodelet
 add_executable(line_detection_node
     src/line_detection.cpp
     src/line_detection_node.cpp
+    src/road_model.cpp
     )
 
 add_dependencies(line_detection_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})

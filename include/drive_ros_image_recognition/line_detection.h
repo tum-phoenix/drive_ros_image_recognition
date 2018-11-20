@@ -14,8 +14,7 @@
 #include <tf/transform_listener.h>
 #include "drive_ros_msgs/RoadLane.h"
 #include "line.h"
-
-#define GUESS_RESOLUTION = 0.2
+#include "road_model.h"
 
 namespace drive_ros_image_recognition {
 
@@ -25,39 +24,26 @@ private:
   ros::NodeHandle nh_;
   ros::NodeHandle pnh_;
 
-  // drive state enum
-  enum DriveState {
-      StartBox = 0,
-      Parking = 1,
-      Intersection = 2,
-      Street = 3
-  };
-
-  // drive mode config
-  bool isObstaceCourse; // true for Obstacle Evasion Course; false for Free Drive (w/o Obstacles) & Parking
-  DriveState driveState;
-
   // configs
-  float lineWidth_;
-  float lineAngle_;
+  float laneWidthWorld_;
+  float lineAngle_; // not used at the moment
   float lineVar_;
-  float maxViewRange_;
+  float maxSenseRange_;
   int cannyThreshold_;
   int houghThresold_;
   int houghMinLineLen_;
   int houghMaxLineGap_;
+  float segmentLength_;
+  size_t maxRansacInterations_;
 
   // variables
-//  CvImagePtr currentImage_;
-//  std::vector<Line> currentGuess_;
-  std::vector<Line> currentMiddleLine_;
+  RoadModel roadModel;
   ImageOperator image_operator_;
   int imgHeight_;
   int imgWidth_;
 #ifdef PUBLISH_DEBUG
   cv::Mat debugImg_;
 #endif
-  int stopLineCount;
 
   // communication
   image_transport::ImageTransport imageTransport_;
@@ -87,12 +73,8 @@ private:
   dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig>::CallbackType dsrv_cb_;
 
   // methods
-  void findLane();
-  void findLinesWithHough(CvImagePtr img, std::vector<Line> &houghLines);
-  bool findLanesFromStartbox(std::vector<Line> &lines); // called at the start to initialy find the lanes
-  bool findLaneSimple(std::vector<Line> &lines); // finds the lane assuming there are no markings missing (e.g. for Parking area)
-  bool findLaneAdvanced(std::vector<Line> &lines); // finds the lane assuming some markings could be missing
-  bool findIntersectionExit(std::vector<Line> &lines); // find the end of an intersection (used while in intersection)
+  void findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLines);
+  void findLaneMarkings(std::vector<Line> &lines);
 
   // helper functions
   float getDistanceBetweenPoints(const cv::Point2f a, const cv::Point2f b) {
@@ -101,12 +83,19 @@ private:
     return sqrt(dX * dX + dY * dY);
   }
 
-  void determineLineTypes(std::vector<Line> &lines, std::vector<Line> &currentGuess);
-  void classifyHorizontalLine(Line *line, float worldDistToMiddleLine);
-  void buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, std::vector<cv::Point2f> &midLinePoints);
+  std::vector<cv::RotatedRect> buildRegions(cv::Point2f position, float angle);
+  void assignLinesToRegions(std::vector<cv::RotatedRect> *regions, std::vector<Line*> &lines,
+                            std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
+							std::vector<Line*> &rightMarkings, std::vector<Line*> &otherMarkings);
+  bool lineIsInRegion(Line *line, const cv::RotatedRect *region, bool isImageCoordiante) const;
+  bool pointIsInRegion(cv::Point2f *pt, cv::Point2f *edges) const;
+  Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle);
+  bool findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
+  		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
+  bool segmentIsPlausible(Segment *segmentToAdd, bool isFirstSegment);
 
 #ifdef PUBLISH_DEBUG
-  void publishDebugLines(std::vector<Line> &lines);
+  void drawDebugLines(std::vector<Line> &lines);
 #endif
 
 public:

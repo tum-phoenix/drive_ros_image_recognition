@@ -253,8 +253,6 @@ public:
   ///
   /// \brief imageToWorld
   /// Converts all imagePoints to the corresponding worldPoints using the cam2world matrix.
-  /// Important: x and y switches when converted. The origin is on the camera mount point on the ground.
-  /// The y-cooridnate goes to the front of the car, the x-coordinate to the left.
   /// \param imagePoints
   /// \param worldPoints
   /// \return true on success, false on failure.
@@ -274,8 +272,6 @@ public:
   ///
   /// \brief worldToImage
   /// Converts all worldPoints to the corresponding imagePoints using the world2cam matrix.
-  /// Important: x and y switches when converted. The origin is on the camera mount point on the ground.
-  /// The y-cooridnate goes to the front of the car, the x-coordinate to the left.
   /// \param worldPoints
   /// \param imagePoints
   /// \return true on success, false on failure.
@@ -323,6 +319,29 @@ public:
     }
     cv::perspectiveTransform(cameraPoints, warpedImgPoints, scaledCam2world_);
     return true;
+  }
+
+  bool warpedImgToCamera(std::vector<cv::Point2f> &warpedImgPoints, std::vector<cv::Point2f> &cameraPoints) {
+      if(!homography_received_) {
+        ROS_WARN_STREAM("[warpedImgToCamera] Homography not received yet");
+        return false;
+      }
+      cv::perspectiveTransform(warpedImgPoints, cameraPoints, scaledWorld2cam_);
+      return true;
+  }
+
+  bool worldToWarpedImg(std::vector<cv::Point2f> &worldPts, std::vector<cv::Point2f> &warpedImgPts) {
+      std::vector<cv::Point2f> tmp;
+      worldToImage(worldPts, tmp);
+      cameraToWarpedImg(tmp, warpedImgPts);
+      return true;
+  }
+
+  bool warpedImgToWorld(std::vector<cv::Point2f> &warpedImgPts, std::vector<cv::Point2f> &worldPts) {
+      std::vector<cv::Point2f> tmp;
+      warpedImgToCamera(warpedImgPts, tmp);
+      imageToWorld(tmp, worldPts);
+      return true;
   }
 
   /*

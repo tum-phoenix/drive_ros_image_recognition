@@ -5,45 +5,22 @@
 #include <chrono>
 #include <pluginlib/class_list_macros.h>
 #include <eigen3/Eigen/Dense>
+#include <random>
 #include "drive_ros_image_recognition/line_detection.h"
 #include "drive_ros_image_recognition/geometry_common.h"
 #include "drive_ros_msgs/RoadLine.h"
-
-// TODO: if we use this, we have to cite it: https://github.com/kipr/opencv/blob/master/modules/contrib/src/polyfit.cpp
-void polyfit(const cv::Mat& src_x, const cv::Mat& src_y, cv::Mat& dst, int order)
-{
-    CV_Assert((src_x.rows>0)&&(src_y.rows>0)&&(src_x.cols==1)&&(src_y.cols==1)
-            &&(dst.cols==1)&&(dst.rows==(order+1))&&(order>=1));
-    cv::Mat X;
-    X = cv::Mat::zeros(src_x.rows, order+1,CV_32FC1);
-    cv::Mat copy;
-    for(int i = 0; i <=order;i++)
-    {
-        copy = src_x.clone();
-        cv::pow(copy,i,copy);
-        cv::Mat M1 = X.col(i);
-        copy.col(0).copyTo(M1);
-    }
-    cv::Mat X_t, X_inv;
-    transpose(X,X_t);
-    cv::Mat temp = X_t*X;
-    cv::Mat temp2;
-    invert (temp,temp2);
-    cv::Mat temp3 = temp2*X_t;
-    cv::Mat W = temp3*src_y;
-    W.copyTo(dst);
-}
 
 namespace drive_ros_image_recognition {
 
 LineDetection::LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh)
     : nh_(nh)
     , pnh_(pnh)
-    , isObstaceCourse(false)
-    , driveState(DriveState::Street) // TODO: this should be StartBox in real conditions
     , imageTransport_(pnh)
-    , stopLineCount(0)
-    , lineWidth_(0.4)
+    , laneWidthWorld_(0.4)
+	, lineVar_(0.1)
+    , segmentLength_(0.2)
+	, maxSenseRange_(1.6)
+	, maxRansacInterations_(200)
     , image_operator_()
     , dsrv_server_()
     , dsrv_cb_(boost::bind(&LineDetection::reconfigureCB, this, _1, _2))
@@ -63,14 +40,14 @@ bool LineDetection::init() {
     dsrv_server_.setCallback(dsrv_cb_);
 
     //subscribe to camera image
-    imageSubscriber_ = imageTransport_.subscribe("/img_in", 10, &LineDetection::imageCallback, this);
+    imageSubscriber_ = imageTransport_.subscribe("/img_in", 3, &LineDetection::imageCallback, this);
     ROS_INFO_STREAM("Subscribed image transport to topic " << imageSubscriber_.getTopic());
 
     line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLine>("roadLine", 10);
     ROS_INFO_STREAM("Advertising road line on " << line_output_pub_.getTopic());
 
 #ifdef PUBLISH_DEBUG
-    debugImgPub_ = imageTransport_.advertise("debug_image", 10);
+    debugImgPub_ = imageTransport_.advertise("debug_image", 3);
     ROS_INFO_STREAM("Publishing debug image on topic " << debugImgPub_.getTopic());
 #endif
 
@@ -91,27 +68,25 @@ bool LineDetection::init() {
 void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     // TODO: so far these states are only for the free drive (w/o obstacles) and probably not even complete, yet
     auto currentImage = convertImageMessage(imgIn);
-    imgHeight_ = currentImage->rows;
-    imgWidth_ = currentImage->cols;
-    std::vector<Line> linesInImage;
-    findLinesWithHough(currentImage, linesInImage);
-    if(driveState == DriveState::StartBox) {
-        //    findLanesFromStartbox(linesInImage);
-    } else if(driveState == DriveState::Street) {
-        findLaneAdvanced(linesInImage);
-    } else if(driveState == DriveState::Parking) {
-        //    findLaneSimple(linesInImage);
-    } else if(driveState == DriveState::Intersection) {
-        findIntersectionExit(linesInImage);
-    } else {
-
+    cv::Mat homographedImg;
+    if(!image_operator_.homographImage(*currentImage, homographedImg)) {
+        ROS_WARN("Homographing image failed");
+        return;
     }
+    imgHeight_ = homographedImg.rows;
+    imgWidth_ = homographedImg.cols;
+
+#ifdef PUBLISH_DEBUG
+    cv::cvtColor(homographedImg, debugImg_, CV_GRAY2RGB);
+#endif
+
+    std::vector<Line> linesInImage;
+    findLinesWithHough(homographedImg, linesInImage);
+
+    findLaneMarkings(linesInImage);
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
-    //    cv::namedWindow("Debug Image", CV_WINDOW_NORMAL);
-    //    cv::imshow("Debug Image", debugImg_);
-    //    cv::waitKey(1);
 #endif
 
     //  auto t_start = std::chrono::high_resolution_clock::now();
@@ -120,34 +95,529 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     //  ROS_INFO_STREAM("Cycle time: " << (std::chrono::duration<double, std::milli>(t_end-t_start).count()) << "ms");
 }
 
+void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
+    cv::Point2f segStartWorld(0.3f, 0.f);
+    float segAngle = 0.f;
+    float totalSegLength = 0.f;
+    bool findIntersectionExit = false;
+    std::vector<Segment> foundSegments;
+    std::vector<Line*> unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings;
+    std::vector<cv::RotatedRect> regions;
+
+//    ROS_INFO("------------- New image ------------------");
+    for(int i = 0; i < lines.size(); i++) {
+    	unusedLines.push_back(&lines.at(i));
+    }
+
+    roadModel.getFirstPosW(segStartWorld, segAngle);
+    while((totalSegLength < maxSenseRange_) || findIntersectionExit) {
+    	// clear the marking vectors. Otherwise the old ones stay in there.
+    	leftMarkings.clear();
+    	midMarkings.clear();
+    	rightMarkings.clear();
+    	otherMarkings.clear();
+
+        regions = buildRegions(segStartWorld, segAngle);
+		assignLinesToRegions(&regions, unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings);
+        auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle);
+        if(segmentIsPlausible(&seg, foundSegments.empty())) {
+        	foundSegments.push_back(seg);
+        	segAngle = seg.angleTotal; // the current angle of the lane
+        } else {
+        	break;
+        }
+
+        totalSegLength += seg.length;
+        // Move the segment start forward
+        segStartWorld.x = seg.positionWorld.x + cos(seg.angleTotal) * seg.length;
+        segStartWorld.y = seg.positionWorld.y + sin(seg.angleTotal) * seg.length;
+
+
+        // ================================
+        // Search for a stop line
+		// ================================
+        float stopLineAngle;
+        Segment intersectionSegment;
+        findIntersectionExit = false;
+        if(findIntersection(intersectionSegment, segAngle, segStartWorld, leftMarkings, midMarkings, rightMarkings)) {
+        	if(segmentIsPlausible(&intersectionSegment, false)) {
+        		foundSegments.push_back(intersectionSegment);
+        		totalSegLength += intersectionSegment.length;
+        		segAngle = intersectionSegment.angleTotal; // the current angle of the lane
+        		// Move the segment start forward
+        		segStartWorld.x = intersectionSegment.positionWorld.x + cos(intersectionSegment.angleTotal) * intersectionSegment.length;
+				segStartWorld.y = intersectionSegment.positionWorld.y + sin(intersectionSegment.angleTotal) * intersectionSegment.length;
+        		findIntersectionExit = true;
+        	} else {
+        		ROS_WARN("Intersection segment not plausible");
+        		break;
+        	}
+        }
+
+        // only used unused lines for the next iteration
+        unusedLines = otherMarkings;
+    }
+
+//    ROS_INFO("Detection range = %.2f", totalSegLength);
+    roadModel.addSegments(foundSegments);
+
+#ifdef PUBLISH_DEBUG
+    if(foundSegments.size() > 0) {
+    	// ego lane in orange
+    	cv::circle(debugImg_, foundSegments.at(0).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
+    	// left lane marking in purple
+    	cv::circle(debugImg_, foundSegments.at(0).leftPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+    	// right lane marking in purple
+    	cv::circle(debugImg_, foundSegments.at(0).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+    	// mid lane marking in yellow
+    	cv::circle(debugImg_, foundSegments.at(0).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
+    }
+
+    for(int i = 1; i < foundSegments.size(); i++) {
+    	// ego lane in orange
+    	cv::circle(debugImg_, foundSegments.at(i).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
+    	cv::line(debugImg_, foundSegments.at(i-1).positionImage, foundSegments.at(i).positionImage, cv::Scalar(255,128), 2, cv::LINE_AA);
+    	if(!foundSegments.at(i).isIntersection() && !foundSegments.at(i-1).isIntersection()) {
+    		// left lane marking in purple
+    		cv::line(debugImg_, foundSegments.at(i-1).leftPosI, foundSegments.at(i).leftPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
+    		cv::circle(debugImg_, foundSegments.at(i).leftPosI, 3, cv::Scalar(153, 0, 204), 1, cv::LINE_AA);
+    		// right lane marking in purple
+    		cv::line(debugImg_, foundSegments.at(i-1).rightPosI, foundSegments.at(i).rightPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
+    		cv::circle(debugImg_, foundSegments.at(i).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+    		// mid lane marking in yellow
+    		cv::line(debugImg_, foundSegments.at(i-1).midPosI, foundSegments.at(i).midPosI, cv::Scalar(255,255), 2, cv::LINE_AA);
+    		cv::circle(debugImg_, foundSegments.at(i).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
+    	}
+    }
+
+//    for(auto m : unusedLines) {
+//    	cv::line(debugImg_, m->iP1_, m->iP2_, cv::Scalar(0,180), 2, cv::LINE_AA);
+//    }
+#endif
+}
+
+///
+/// \brief LineDetection::buildRegions
+/// \param position Position of the segment in world coordinates
+/// \param angle
+/// \return the four regions in image coordinates
+/// TODO: maybe return regions in world coordinates
+///
+std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWorld, float angle) {
+    cv::Vec2f dirVec(cos(angle), sin(angle)); // in world coordinates
+    cv::Vec2f leftVec(laneWidthWorld_ * dirVec[1], laneWidthWorld_ * dirVec[0]); // in world coordinates
+    std::vector<cv::RotatedRect> regions(4);
+
+//    ROS_INFO_STREAM("dirVec(W): " << dirVec);
+//    ROS_INFO_STREAM("leftVec(W): " << leftVec);
+
+    // Convert the position to image coordinates
+    std::vector<cv::Point2f> imgPts(1), worldPts(1);
+    worldPts.at(0) = positionWorld;
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+    cv::Point2f position = imgPts.at(0);
+
+    // Calculate the region size in world coordinates and then convert to size in image coordinates
+    cv::Point2f tmpWorldPt(positionWorld.x + segmentLength_, positionWorld.y + laneWidthWorld_);
+    worldPts.at(0) = tmpWorldPt;
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+    cv::Size regionSize(imgPts.at(0).x - position.x, position.y - imgPts.at(0).y);
+
+    // Get the region points in world coordinates
+    worldPts.resize(4);
+    imgPts.resize(4);
+    cv::Point2f centerR2(positionWorld.x + (0.5f * segmentLength_ * dirVec[0]) + (0.5f * leftVec[0]),
+                         positionWorld.y + (0.5f * segmentLength_ * dirVec[1]) - (0.5f * leftVec[1]));
+    cv::Point2f centerR0(centerR2.x - 2*leftVec[0], centerR2.y + 2*leftVec[1]);
+    cv::Point2f centerR1(centerR2.x - leftVec[0], centerR2.y + leftVec[1]);
+    cv::Point2f centerR3(centerR2.x + leftVec[0], centerR2.y - leftVec[1]);
+    worldPts.at(0) = centerR0;
+    worldPts.at(1) = centerR1;
+    worldPts.at(2) = centerR2;
+    worldPts.at(3) = centerR3;
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+
+    // Create the regions
+    for(int i = 0; i < 4; i++) {
+        regions.at(i) = cv::RotatedRect(imgPts.at(i), regionSize, (-angle * 180.f / M_PI));
+    }
+
+#ifdef PUBLISH_DEBUG
+//    for(int i = 0; i < 3; i++) {
+//    	auto r = regions.at(i);
+//        cv::Point2f edges[4];
+//        r.points(edges);
+//
+//        for(int i = 0; i < 4; i++)
+//            cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255));
+//    }
+#endif
+
+    return regions;
+}
+
+///
+/// \param regions at least 3 regions (currently in image coordinates, but could be changed -> TODO)
+///
+void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, std::vector<Line*> &lines,
+                                         std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
+										 std::vector<Line*> &rightMarkings, std::vector<Line*> &otherMarkings) {
+    for(auto linesIt = lines.begin(); linesIt != lines.end(); ++linesIt) {
+        if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
+            leftMarkings.push_back(*linesIt);
+//            cv::line(debugImg_, linesIt->iP1_, linesIt->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA); // Green
+        } else if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
+            midMarkings.push_back(*linesIt);
+//            cv::line(debugImg_, linesIt->iP1_, linesIt->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA); // Green
+        } else if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
+            rightMarkings.push_back(*linesIt);
+//            cv::line(debugImg_, linesIt->iP1_, linesIt->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA); // Green
+        } else {
+        	otherMarkings.push_back(*linesIt);
+        }
+    }
+}
+
+///
+/// \brief LineDetection::lineIsInRegion
+/// \param line
+/// \param region in image coordinates
+/// \param isImageCoordinate true, if region is given in image coordinates
+/// \return
+///
+bool LineDetection::lineIsInRegion(Line *line, const cv::RotatedRect *region, bool isImageCoordiante) const {
+    cv::Point2f edges[4];
+    region->points(edges); // bottomLeft, topLeft, topRight, bottomRight
+
+    if(isImageCoordiante) {
+    	// we check if at least on of the lines ends is in the region
+    	if(pointIsInRegion(&(line->iP1_), edges))
+    		return true;
+    	else
+    		return pointIsInRegion(&(line->iP2_), edges);
+    } else {
+    	// we check if at least on of the lines ends is in the region
+    	if(pointIsInRegion(&(line->wP1_), edges))
+    		return true;
+    	else
+    		return pointIsInRegion(&(line->wP2_), edges);
+    }
+}
+
+bool LineDetection::pointIsInRegion(cv::Point2f *pt, cv::Point2f *edges) const {
+    auto u = edges[0] - edges[1];
+    auto v = edges[0] - edges[3];
+
+    auto uDotPt = u.dot(*pt);
+    auto uDotP1 = u.dot(edges[0]);
+    auto uDotP2 = u.dot(edges[1]);
+    auto vDotPt = v.dot(*pt);
+    auto vDotP1 = v.dot(edges[0]);
+    auto vDotP4 = v.dot(edges[3]);
+
+    bool xOk = (uDotPt < uDotP1 && uDotPt > uDotP2) ||
+               (uDotPt > uDotP1 && uDotPt < uDotP2);
+    bool yOk = (vDotPt < vDotP1 && vDotPt > vDotP4) ||
+               (vDotPt > vDotP1 && vDotPt < vDotP4);
+
+    return xOk && yOk;
+}
+
+///
+/// \brief LineDetection::findLaneWithRansac
+/// \param leftMarkings
+/// \param midMarkings
+/// \param rightMarkings
+/// \param pos the segments position in world coordinates
+/// \param prevAngle
+/// \return
+///
+Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings,
+                                          cv::Point2f pos, float prevAngle) {
+    float bestAngle = prevAngle;
+    float bestScore = 0.f;
+    cv::Point2f bestLeft, bestMid, bestRight;
+    size_t numLines = leftMarkings.size() + midMarkings.size() + rightMarkings.size();
+//    float angleVar = M_PI / 32.0f; // TODO move to config
+    size_t maxIterations = 200, iteration = 0;
+    std::vector<cv::Point2f> worldPts, imgPts;
+    worldPts.push_back(pos);
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+
+    if(numLines < 5) {
+//        ROS_WARN("No lines for Ransac");
+        return Segment(pos, imgPts.at(0), 0.f, prevAngle, segmentLength_, 0.f);
+    }
+
+    std::default_random_engine generator;
+    std::uniform_int_distribution<int> distribution(0, numLines - 1);
+
+//    ROS_INFO_STREAM("Left markings: " << leftMarkings.size());
+//    ROS_INFO_STREAM("Mid markings: " << midMarkings.size());
+//    ROS_INFO_STREAM("Right markings: " << rightMarkings.size());
+//    if(leftMarkings.size() < 2)
+//    	ROS_WARN_STREAM("Only having " << leftMarkings.size() << " left markings");
+//    if(midMarkings.size() < 2)
+//    	ROS_WARN_STREAM("Only having " << midMarkings.size() << " mid markings");
+//    if(rightMarkings.size() < 2)
+//    	ROS_WARN_STREAM("Only having " << rightMarkings.size() << " right markings");
+
+    while(bestScore < 0.9 && (iteration++ < maxIterations)) {
+        // Select a random line and get its angle
+    	// Also get a random point and move it on the expected middle line
+        int randomIdx = distribution(generator);
+        float currentAngle = prevAngle;
+        cv::Vec2f dirVec;
+        cv::Point2f randomPoint;
+
+        if(randomIdx < leftMarkings.size()) {
+            currentAngle = leftMarkings.at(randomIdx)->getAngle();
+            randomPoint =  leftMarkings.at(randomIdx)->wP1_;
+            dirVec = cv::Vec2f (cos(currentAngle), sin(currentAngle));
+            cv::Vec2f downVec(dirVec[1], - dirVec[0]);
+            randomPoint.x += downVec[0] * laneWidthWorld_;
+            randomPoint.y += downVec[1] * laneWidthWorld_;
+//            ROS_INFO_STREAM("Move left marking from " << leftMarkings.at(randomIdx)->wP1_ << " with " << (downVec * laneWidthWorld_));
+        } else if((randomIdx - leftMarkings.size()) < midMarkings.size()){
+            currentAngle = midMarkings.at(randomIdx - leftMarkings.size())->getAngle();
+            randomPoint =  midMarkings.at(randomIdx - leftMarkings.size())->wP1_;
+            dirVec = cv::Vec2f (cos(currentAngle), sin(currentAngle));
+            // This point is already on the middle line
+//            ROS_INFO_STREAM("Use mid marking " << midMarkings.at(randomIdx - leftMarkings.size())->wP1_);
+        } else {
+            currentAngle = rightMarkings.at(randomIdx - leftMarkings.size() - midMarkings.size())->getAngle();
+            randomPoint =  rightMarkings.at(randomIdx - leftMarkings.size() - midMarkings.size())->wP1_;
+            dirVec = cv::Vec2f (cos(currentAngle), sin(currentAngle));
+            cv::Vec2f upVec(- dirVec[1], dirVec[0]);
+            randomPoint.x += upVec[0] * laneWidthWorld_;
+            randomPoint.y += upVec[1] * laneWidthWorld_;
+//            ROS_INFO_STREAM("Move right marking from " << rightMarkings.at(randomIdx - leftMarkings.size() - midMarkings.size())->wP1_ <<
+//            		" with " << (upVec * laneWidthWorld_));
+        }
+
+        // Now build 3 RotatedRects where we expect the lane markings
+        cv::Size2f boxSize(segmentLength_ * 2, lineVar_ * 2);
+//        ROS_INFO_STREAM("Box size: " << boxSize);
+        cv::Vec2f upVec(- dirVec[1], dirVec[0]);
+        cv::Point2f leftPos(randomPoint.x + upVec[0] * laneWidthWorld_, randomPoint.y + upVec[1] * laneWidthWorld_);
+        cv::Point2f rightPos(randomPoint.x - upVec[0] * laneWidthWorld_, randomPoint.y - upVec[1] * laneWidthWorld_);
+        cv::RotatedRect midBox(randomPoint, boxSize, currentAngle * 180.f / M_PI);
+        cv::RotatedRect leftBox(leftPos, boxSize, currentAngle * 180.f / M_PI);
+        cv::RotatedRect rightBox(rightPos, boxSize, currentAngle * 180.f / M_PI);
+
+//        ROS_INFO_STREAM("center left: " << cv::Point2f(randomPoint.x + dirVec[0] * laneWidthWorld_,
+//        											   randomPoint.y + dirVec[1] * laneWidthWorld_));
+//        ROS_INFO_STREAM("center mid: " << randomPoint);
+//        ROS_INFO_STREAM("center right: " << cv::Point2f(randomPoint.x - dirVec[0] * laneWidthWorld_,
+//        											   	randomPoint.y - dirVec[1] * laneWidthWorld_));
+
+#ifdef PUBLISH_DEBUG
+//        std::vector<cv::RotatedRect> regions(3);
+//        regions.at(0) = midBox;
+//        regions.at(1) = leftBox;
+//        regions.at(2) = rightBox;
+//        for(auto r : regions) {
+//        	cv::Point2f edges[4];
+//        	r.points(edges);
+//
+//        	std::vector<cv::Point2f> imgPts, worldPts;
+//        	worldPts.push_back(edges[0]);
+//        	worldPts.push_back(edges[1]);
+//        	worldPts.push_back(edges[2]);
+//        	worldPts.push_back(edges[3]);
+//        	worldPts.push_back(r.center);
+//        	image_operator_.worldToWarpedImg(worldPts, imgPts);
+//
+//        	for(int i = 0; i < 4; i++)
+//        		cv::line(debugImg_, imgPts.at(i), imgPts.at((i+1)%4), cv::Scalar(255,255,255), 2, cv::LINE_AA);
+//        	cv::circle(debugImg_, imgPts.at(4), 3, cv::Scalar(255,128), 1, cv::LINE_AA);
+//        }
+#endif
+
+        // Check for inliers
+        int numInliers = 0;
+        numInliers += std::count_if(leftMarkings.begin(), leftMarkings.end(),
+        		[leftBox, this](Line *l) {return lineIsInRegion(l, &leftBox, false);});
+        numInliers += std::count_if(midMarkings.begin(), midMarkings.end(),
+        		[midBox, this](Line *l) {return lineIsInRegion(l, &midBox, false);});
+        numInliers += std::count_if(rightMarkings.begin(), rightMarkings.end(),
+        		[rightBox, this](Line *l) {return lineIsInRegion(l, &rightBox, false);});
+
+        // compare the selected angle to all lines
+//        int numInliers = 0;
+//        numInliers += std::count_if(leftMarkings.begin(), leftMarkings.end(),
+//                                    [currentAngle, angleVar](Line *l) {return std::abs(l->getAngle() - currentAngle) < angleVar;});
+//        numInliers += std::count_if(midMarkings.begin(), midMarkings.end(),
+//                                    [currentAngle, angleVar](Line *l) {return std::abs(l->getAngle() - currentAngle) < angleVar;});
+//        numInliers += std::count_if(rightMarkings.begin(), rightMarkings.end(),
+//                                    [currentAngle, angleVar](Line *l) {return std::abs(l->getAngle() - currentAngle) < angleVar;});
+
+        float newScore = static_cast<float>(numInliers) / static_cast<float>(numLines);
+        if(newScore > bestScore) {
+            bestScore = newScore;
+            bestAngle = currentAngle;
+            bestLeft = leftPos;
+            bestMid = randomPoint;
+            bestRight = rightPos;
+        }
+    }
+
+//    ROS_INFO_STREAM("Best score: " << bestScore << " with " << (bestScore*(float)numLines) << "/" << numLines <<  " lines");
+
+    // Calculate the segments position based on the results
+    // First the a point on the right lane
+    cv::Point2f laneMidPt = bestRight;
+    cv::Vec2f rightToMidVec(bestMid.x - bestRight.x, bestMid.y - bestRight.y);
+    laneMidPt.x += 0.5 * rightToMidVec[0];
+    laneMidPt.y += 0.5 * rightToMidVec[1];
+    // Move this point back so it is at the segments start
+//    ROS_INFO_STREAM("Old position: " << pos << " new one: " << laneMidPt);
+    cv::Vec2f segDir(cos(bestAngle), sin(bestAngle)); // orientation vector of segment
+    cv::Vec2f vecToInitPos(laneMidPt.x - pos.x, laneMidPt.y - pos.y); // vector from init position to new position
+    float distToInitPos = sqrt(vecToInitPos[0]*vecToInitPos[0] + vecToInitPos[1]*vecToInitPos[1]);
+    if(laneMidPt.x < pos.x) {
+    	laneMidPt.x += segDir[0] * distToInitPos;
+    	laneMidPt.y += segDir[1] * distToInitPos;
+    } else {
+    	laneMidPt.x -= segDir[0] * distToInitPos;
+    	laneMidPt.y -= segDir[1] * distToInitPos;
+    }
+//    ROS_INFO_STREAM("Corrected to: " << laneMidPt);
+
+//    auto angleBetweenVecs = acos(segDir.dot(vecToInitPos));
+//    ROS_INFO_STREAM("angle between vecs = " << (angleBetweenVecs * 180.f / M_PI));
+
+//    ROS_INFO_STREAM("Move from " << laneMidPt << " with " << (segDir * distToInitPos) << " with goal " << pos);
+
+//    ROS_INFO_STREAM("Ended up at " << laneMidPt);
+
+//    float t = (laneMidPt.x - pos.x) / segDir[0];
+//    laneMidPt.x += t * segDir[0];
+//    laneMidPt.y += t * segDir[1];
+    // Convert all needed points to image coordinates
+    worldPts.clear();
+    imgPts.clear();
+    worldPts.push_back(laneMidPt);
+    worldPts.push_back(bestLeft);
+    worldPts.push_back(bestMid);
+    worldPts.push_back(bestRight);
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+
+    auto lengthVec = bestMid - pos;
+    auto segLen = sqrt(lengthVec.x*lengthVec.x + lengthVec.y*lengthVec.y);
+
+    // Create the segment
+    Segment s(laneMidPt, imgPts.at(0), prevAngle - bestAngle, bestAngle, segLen, bestScore);
+    s.leftPosW = bestLeft;
+    s.midPosW = bestMid;
+    s.rightPosW = bestRight;
+    s.leftPosI = imgPts.at(1);
+    s.midPosI = imgPts.at(2);
+    s.rightPosI = imgPts.at(3);
+
+    return s;
+}
+
+bool LineDetection::findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
+		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings) {
+
+	bool foundIntersection = false;
+	bool middleExists = false, rightExists = false, leftExists = false;
+	float stopLineAngle = 0.f;
+	int numStopLines = 0;
+
+	for(auto l : leftMarkings) {
+		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (M_PI  / 7.0f)) {
+			leftExists = true;
+			cv::line(debugImg_, l->iP1_, l->iP2_, cv::Scalar(155), 2, cv::LINE_AA);
+		}
+	}
+
+	for(auto l : midMarkings) {
+		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (M_PI  / 7.0f)) {
+			middleExists = true;
+			numStopLines++;
+			stopLineAngle += l->getAngle();
+			cv::line(debugImg_, l->iP1_, l->iP2_, cv::Scalar(57,189,37), 2, cv::LINE_AA);
+		}
+	}
+
+	for(auto l : rightMarkings) {
+		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (M_PI  / 7.0f)) {
+			rightExists = true;
+			cv::line(debugImg_, l->iP1_, l->iP2_, cv::Scalar(0,255,255), 2, cv::LINE_AA);
+		}
+	}
+
+	// DEBUG
+//	if(leftExists || rightExists || middleExists) {
+//		ROS_INFO("Left: %s    middle: %s    right: %s", (leftExists ? "Yes" : "No"), (middleExists ? "Yes" : "No"), (rightExists ? "Yes" : "No"));
+//	}
+
+	// Build a segment for the whole intersection
+	Eigen::Vector2f laneDir;
+	SegmentType intersectionType;
+	float drivingDirectionAngle = segmentAngle;
+	if(middleExists && (leftExists || rightExists)) {
+		ROS_INFO("Intersection found - stop");
+		foundIntersection = true;
+		intersectionType = SegmentType::INTERSECTION_STOP;
+		stopLineAngle = stopLineAngle / static_cast<float>(numStopLines);
+		drivingDirectionAngle = stopLineAngle - M_PI_2;
+//		laneDir = Eigen::Vector2f(sin(stopLineAngle), - cos(stopLineAngle)); // direction of vector perpendicular to stop line
+		laneDir = Eigen::Vector2f(cos(drivingDirectionAngle), sin(drivingDirectionAngle));
+	}
+	if(!middleExists && leftExists && rightExists) {
+		ROS_INFO("Intersection found - do not stop");
+		foundIntersection = true;
+		intersectionType = SegmentType::INTERSECTION_GO_STRAIGHT;
+		laneDir = Eigen::Vector2f(cos(segmentAngle), sin(segmentAngle));
+	}
+
+	if(foundIntersection) {
+		std::vector<cv::Point2f> imgPts, worldPts;
+		float segmentLength = laneWidthWorld_ * 2.5f;
+
+		worldPts.push_back(segStartWorld);
+		image_operator_.worldToWarpedImg(worldPts, imgPts);
+		// Segment(cv::Point2f worldPos, cv::Point2f imagePos, float angleDiff_, float angleTotal_, float len, float prob)
+		resultingSegment = Segment(segStartWorld, imgPts.at(0), segmentAngle - drivingDirectionAngle,
+				drivingDirectionAngle, segmentLength, 1.0f);
+		resultingSegment.segmentType = intersectionType;
+	}
+
+	return foundIntersection;
+}
+
+bool LineDetection::segmentIsPlausible(Segment *segmentToAdd, bool isFirstSegment) {
+	if(segmentToAdd-> probablity < 0.2f) {
+//		ROS_INFO("Segments probability is too low");
+		return false;
+	}
+	if(!isFirstSegment) {
+		float angleVar = M_PI / 7.0f; // TODO move to config
+		if(std::abs(segmentToAdd->angleDiff) > angleVar) {
+//			ROS_INFO_STREAM("Too much angle difference: " << (segmentToAdd->angleDiff * 180.f / M_PI) << "[deg]");
+			return false;
+		}
+	}
+
+	return true;
+}
+
 ///
 /// \brief LineDetection::findLinesWithHough
 /// Extract Lines from the image using Hough Lines
 /// \param img A CvImagePtr to the current image where we want to search for lines
 /// \param houghLines A std::vector where the Lines will be returned. Has to be empty.
 ///
-void LineDetection::findLinesWithHough(CvImagePtr img, std::vector<Line> &houghLines) {
+void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLines) {
     cv::Mat processingImg;
-#ifdef PUBLISH_DEBUG
-    cv::cvtColor(*img, debugImg_, CV_GRAY2RGB);
-#endif
 
     // Blur the image and find edges with Canny
-    cv::GaussianBlur(*img, processingImg, cv::Size(15, 15), 0, 0);
+    cv::GaussianBlur(img, processingImg, cv::Size(15, 15), 0, 0);
     cv::Canny(processingImg, processingImg, cannyThreshold_, cannyThreshold_ * 3, 3);
 
-    // Zero out the vehicle
-    int imgWidth = processingImg.cols;
-    int imgHeight = processingImg.rows;
-    cv::Point vehiclePolygon[1][4];
-    // TODO: these factor should be in a config
-    vehiclePolygon[0][0] = cv::Point(imgWidth * .35, imgHeight);
-    vehiclePolygon[0][1] = cv::Point(imgWidth * .65, imgHeight);
-    vehiclePolygon[0][2] = cv::Point(imgWidth * .65, imgHeight * .8);
-    vehiclePolygon[0][3] = cv::Point(imgWidth * .35, imgHeight * .8);
-    const cv::Point* polygonStarts[1] = { vehiclePolygon[0] };
-    int polygonLengths[] = { 4 };
-    cv::fillPoly(processingImg, polygonStarts, polygonLengths, 1, cv::Scalar(), cv::LINE_8);
 
     // Get houghlines
     std::vector<cv::Vec4i> hLinePoints;
@@ -157,466 +627,59 @@ void LineDetection::findLinesWithHough(CvImagePtr img, std::vector<Line> &houghL
     std::vector<cv::Point2f> imagePoints, worldPoints;
     for(size_t i = 0; i < hLinePoints.size(); i++) {
         cv::Vec4i currentPoints = hLinePoints.at(i);
-        imagePoints.push_back(cv::Point(currentPoints[0], currentPoints[1]));
-        imagePoints.push_back(cv::Point(currentPoints[2], currentPoints[3]));
+        // Ignore lines very close to the car and about to be parallel to image y-axis
+        if(!((currentPoints[0] < 50) && (currentPoints[2] < 50))) {
+            imagePoints.push_back(cv::Point(currentPoints[0], currentPoints[1]));
+            imagePoints.push_back(cv::Point(currentPoints[2], currentPoints[3]));
+        }
     }
-    image_operator_.imageToWorld(imagePoints, worldPoints);
 
-    // Build lines from points to return them
+    image_operator_.warpedImgToWorld(imagePoints, worldPoints);
+
+    // Build lines from points
+    std::vector<Line> lines;
     for(size_t i = 0; i < worldPoints.size(); i += 2) {
-        houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1), Line::LineType::UNKNOWN));
+        lines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
     }
+
+    // Split lines which are longer than segmentLength (world coordinates)
+    worldPoints.clear();
+    imagePoints.clear();
+    for(auto it = lines.begin(); it != lines.end(); ++it) {
+    	int splitInto = static_cast<int>(it->getWorldLength() / segmentLength_) + 1;
+//    	ROS_INFO_STREAM("Length = " << it->getWorldLength() << " split into " << splitInto);
+
+    	if(splitInto > 1) {
+    		// Build normalized vector
+    		cv::Vec2f dir = it->wP2_ - it->wP1_;
+    		auto length = sqrt(dir[0]*dir[0] + dir[1]*dir[1]);
+    		dir[0] = dir[0] / length;
+    		dir[1] = dir[1] / length;
+
+    		cv::Point2f curPos = it->wP1_;
+    		for(int i = 0; i < (splitInto - 1); i++) {
+    			worldPoints.push_back(curPos);
+    			curPos.x += dir[0] * segmentLength_;
+    			curPos.y += dir[1] * segmentLength_;
+    			worldPoints.push_back(curPos);
+    		}
+    		// This is the last part of the split line
+    		worldPoints.push_back(curPos);
+    		worldPoints.push_back(it->wP2_);
+    	} else {
+    		houghLines.push_back(*it);
+    	}
+    }
+
+    // Build split lines
+    image_operator_.worldToWarpedImg(worldPoints, imagePoints);
+    for(size_t i = 0; i < worldPoints.size(); i += 2) {
+    	houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
+    }
+
+//    ROS_INFO_STREAM("Started with " << lines.size() << " lines, now having " << houghLines.size());
 
     return;
-}
-
-///
-/// \brief LineDetection::findLaneAdvanced
-/// In this scenario lines can be missing, we could have a double middle line, intersection lines,
-/// and the start line could occur.
-/// \param lines
-/// \return
-///
-bool LineDetection::findLaneAdvanced(std::vector<Line> &lines) {
-    // Last frames middle line is our new guess. Clear old middle line
-    std::vector<Line> currentGuess;
-    if(!currentMiddleLine_.empty()) {
-        for(auto l : currentMiddleLine_) {
-            l.lineType_ = Line::LineType::GUESS;
-            currentGuess.push_back(l);
-        }
-        currentMiddleLine_.clear();
-    }
-
-    // todo: we should only do this, when the car starts in the start box. Otherwise we can get in trouble
-    std::vector<cv::Point2f> imagePoints, worldPoints;
-    if(currentGuess.empty()) {
-        ROS_WARN("Dummy guess");
-        // todo: we should have a state like "RECOVER", where we try to find the middle line again (more checks, if it is really the middle one)
-        worldPoints.push_back(cv::Point2f(0.24, 0.2));
-        worldPoints.push_back(cv::Point2f(0.4, 0.2));
-        worldPoints.push_back(cv::Point2f(0.55, 0.2));
-        worldPoints.push_back(cv::Point2f(0.70, 0.2));
-        image_operator_.worldToImage(worldPoints, imagePoints);
-        for(size_t i = 1; i < imagePoints.size(); i++)
-            currentGuess.push_back(Line(imagePoints.at(i - 1), imagePoints.at(i), worldPoints.at(i - 1), worldPoints.at(i), Line::LineType::GUESS));
-    }
-
-    publishDebugLines(currentGuess);
-
-    // Use the guess to classify the lines
-    determineLineTypes(lines, currentGuess);
-    std::vector<Line> leftLines, middleLines, rightLines, horizontalLines;
-    for(auto l : lines) {
-        if(l.lineType_ == Line::LineType::MIDDLE_LINE)
-            middleLines.push_back(l);
-        else if(l.lineType_ == Line::LineType::LEFT_LINE)
-            leftLines.push_back(l);
-        else if(l.lineType_ == Line::LineType::RIGHT_LINE)
-            rightLines.push_back(l);
-        else if(l.lineType_ == Line::LineType::HORIZONTAL_LEFT_LANE ||
-                l.lineType_ == Line::LineType::HORIZONTAL_OUTER_LEFT ||
-                l.lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE ||
-                l.lineType_ == Line::LineType::HORIZONTAL_OUTER_RIGHT)
-            horizontalLines.push_back(l);
-    }
-
-    // Classify the horizontal lines
-    // Find start line
-    // TODO: check if we have lines on left and right lane. in this case, set all left and right ones (in a certain x-interval to start line)
-    for(auto firstIt = horizontalLines.begin(); firstIt != horizontalLines.end(); ++firstIt) {
-        for(auto secondIt = horizontalLines.begin(); secondIt != horizontalLines.end(); ++secondIt) {
-            if(((firstIt->lineType_ == Line::LineType::HORIZONTAL_LEFT_LANE) && (secondIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE)) ||
-                    ((firstIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE) && (secondIt->lineType_ == Line::LineType::HORIZONTAL_LEFT_LANE))) {
-                if(abs(firstIt->wMid_.x - secondIt->wMid_.x) < 0.2) {
-                    firstIt->lineType_ = Line::LineType::START_LINE;
-                    secondIt->lineType_ = Line::LineType::START_LINE;
-                }
-            }
-        }
-    }
-
-    // Find stop line
-    std::vector<float> distsToStopLine;
-    for(auto firstIt = horizontalLines.begin(); firstIt != horizontalLines.end(); ++firstIt) {
-        if(firstIt->lineType_ == Line::LineType::HORIZONTAL_RIGHT_LANE) {
-            bool foundRightOuterBound = false, foundLeftOuterBound = false;
-            for(auto secondIt = horizontalLines.begin(); secondIt != horizontalLines.end(); ++secondIt) {
-                if(secondIt->lineType_ == Line::LineType::HORIZONTAL_OUTER_LEFT)
-                    foundLeftOuterBound = true;
-                else if(secondIt->lineType_ == Line::LineType::HORIZONTAL_OUTER_RIGHT)
-                    foundRightOuterBound = true;
-            }
-            if(foundLeftOuterBound && foundRightOuterBound) {
-                firstIt->lineType_ = Line::LineType::STOP_LINE;
-                distsToStopLine.push_back(firstIt->wMid_.x);
-            }
-        }
-    }
-    if(distsToStopLine.size() > 2) {
-        auto avgDistToStopLine = std::accumulate(distsToStopLine.begin(), distsToStopLine.end(), 0.0f) / distsToStopLine.size();
-        ROS_INFO_STREAM("Found a stop line; distance to it = " << avgDistToStopLine);
-        stopLineCount++;
-        if(avgDistToStopLine <= 0.6f) { // TODO: magic number
-
-            if(stopLineCount > 5) {
-                driveState = DriveState::Intersection;
-                // todo: create intersection exit based on stop line (orthogonal) or middle line?
-            }
-            // todo: maybe return here? but do not forget to publish road points
-        }
-    } else {
-        stopLineCount = 0;
-    }
-
-#ifdef PUBLISH_DEBUG
-    publishDebugLines(rightLines);
-    publishDebugLines(leftLines);
-    publishDebugLines(horizontalLines);
-#endif
-
-    if(middleLines.empty()) {
-        // this can happen when approach an intersection without a stop line
-        ROS_INFO("------------- no middle line found");
-        worldPoints.clear();
-        imagePoints.clear();
-        for(auto l : rightLines) {
-            // perpendiculare vector
-            Eigen::Vector2f vec(-(l.wP2_.y - l.wP1_.y),
-                                (l.wP2_.x - l.wP1_.x));
-            vec.normalize();
-            vec *= lineWidth_;
-            worldPoints.push_back(cv::Point2f(l.wP1_.x + vec(0), l.wP1_.y + vec(1)));
-            worldPoints.push_back(cv::Point2f(l.wP2_.x + vec(0), l.wP2_.y + vec(1)));
-//            ROS_INFO_STREAM("Moved (" << l.wP1_.x << "," << l.wP1_.y << ") to (" << (l.wP1_.x + vec(0)) << "," << (l.wP1_.y + vec(1)) << ")");
-        }
-        for(auto l : leftLines) {
-            // perpendiculare vector
-            Eigen::Vector2f vec((l.wP2_.y - l.wP1_.y),
-                                -(l.wP2_.x - l.wP1_.x));
-            vec.normalize();
-            vec *= lineWidth_;
-            worldPoints.push_back(cv::Point2f(l.wP1_.x + vec(0), l.wP1_.y + vec(1)));
-            worldPoints.push_back(cv::Point2f(l.wP2_.x + vec(0), l.wP2_.y + vec(1)));
-//            ROS_INFO_STREAM("Moved (" << l.wP1_.x << "," << l.wP1_.y << ") to (" << (l.wP1_.x + vec(0)) << "," << (l.wP1_.y + vec(1)) << ")");
-        }
-
-        if(worldPoints.empty())
-            return false;
-
-        int order = 1;
-        cv::Mat srcX(worldPoints.size(), 1, CV_32FC1);
-        cv::Mat srcY(worldPoints.size(), 1, CV_32FC1);
-//        (src_x.rows>0)&&(src_y.rows>0)&&(src_x.cols==1)
-//        (src_y.cols==1)
-//        (dst.cols==1)&&(dst.rows==(order+1))&&(order>=1)
-        cv::Mat dst(order+1, 1, CV_32FC1);
-
-
-//        image_operator_.worldToImage(worldPoints, imagePoints);
-        for(int i = 0; i < worldPoints.size(); i += 2) {
-//            middleLines.push_back(Line(imagePoints.at(i), imagePoints.at(i+1), worldPoints.at(i), worldPoints.at(i+1), Line::LineType::MIDDLE_LINE));
-            srcX.at<float>(i, 0) = worldPoints.at(i).x;
-            srcX.at<float>(i+1, 0) = worldPoints.at(i+1).x;
-            srcY.at<float>(i, 0) = worldPoints.at(i).y;
-            srcY.at<float>(i+1, 0) = worldPoints.at(i+1).y;
-        }
-
-        ROS_INFO_STREAM("srcX dims = " << srcX.size << "; srcY dims = " << srcY.size << "; dst dims = " << dst.size);
-        polyfit(srcX, srcY, dst, order);
-        ROS_INFO_STREAM("PolyFit = " << dst);
-
-        worldPoints.clear();
-        auto a = dst.at<float>(0,0);
-        auto b = dst.at<float>(1,0);
-
-        for(int i = 1; i < 8; i++) {
-            auto x = i * 0.3;
-            worldPoints.push_back(cv::Point2f(x, a*x + b));
-        }
-
-        imagePoints.clear();
-        currentMiddleLine_.clear();
-        image_operator_.worldToImage(worldPoints, imagePoints);
-        for(int i = 1; i < worldPoints.size(); i++) {
-            currentMiddleLine_.push_back(Line(imagePoints.at(i-1), imagePoints.at(i), worldPoints.at(i-1), worldPoints.at(i), Line::LineType::MIDDLE_LINE));
-            ROS_INFO_STREAM("World line: (" << worldPoints.at(i-1).x << "," << worldPoints.at(i-1).y << ") - (" <<
-                            worldPoints.at(i).x << "," << worldPoints.at(i).y << ")");
-        }
-
-        publishDebugLines(currentMiddleLine_);
-        return true;
-    }
-
-    // ------------------------------------------------------------------------------------------------------------------------------------
-    // TODO: find a better and more efficient way to do this. maybe also project left and right line into middle to use all points.
-    // ------------------------------------------------------------------------------------------------------------------------------------
-    // in the free drive event, double lines are treated as normal dashed lines
-    // sort our middle lines based on wP1_.x of line
-    std::sort(middleLines.begin(), middleLines.end(), [](Line &a, Line &b){ return a.wP1_.x < b.wP1_.x; });
-    // build bounding boxes around group of lines, where lines in group are closer than 0.25m to each other
-    float currentMinX = middleLines.at(0).wP1_.x;
-    std::vector<cv::Point2f> cPts, newMidLinePts;
-    for(auto l : middleLines) {
-        if(l.wP1_.x > (currentMinX + 0.25)) {
-            buildBbAroundLines(cPts, newMidLinePts);
-            cPts.clear();
-            currentMinX = l.wP1_.x;
-        }
-        cPts.push_back(l.wP1_);
-        cPts.push_back(l.wP2_);
-    }
-
-    // finish the bounding box building step
-    if(!cPts.empty()) {
-        buildBbAroundLines(cPts, newMidLinePts);
-    }
-
-    // build the middle line from out points
-    // extend the last line to the front
-    auto wPt1 = newMidLinePts.at(newMidLinePts.size() - 2);
-    auto wPt2 = newMidLinePts.at(newMidLinePts.size() - 1);
-    auto dir = wPt2 - wPt1;
-    auto dirLen = sqrt(dir.x * dir.x + dir.y * dir.y);
-
-    auto newPt = wPt2 + (dir * (0.6 / dirLen));
-    if(newPt.x < maxViewRange_)
-        newMidLinePts.push_back(newPt);
-
-    // extend first line to the back
-    wPt1 = newMidLinePts.at(0);
-    wPt2 = newMidLinePts.at(1);
-    dir = wPt2 - wPt1;
-    dirLen = sqrt(dir.x * dir.x + dir.y * dir.y);
-    // the image starts 0.24m from the rear_axis_middle_ground. TODO: sould be in config
-    auto distToImageBoundary = wPt1.x - 0.24;
-    if(distToImageBoundary > 0.1) { // distance is positive
-        // dir, distToImageBoundary, dirLen are all positive
-        newPt = wPt1 - (dir * distToImageBoundary / dirLen);
-        newMidLinePts.push_back(newPt);
-    }
-
-    // sort the world points based on the distance to the car
-    std::sort(newMidLinePts.begin(), newMidLinePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; });
-
-    // convert points
-    imagePoints.clear();
-    image_operator_.worldToImage(newMidLinePts, imagePoints);
-    // create the new middle line
-    currentMiddleLine_.clear();
-    for(size_t i = 1; i < imagePoints.size(); i++) {
-        auto a = imagePoints.at(i - 1);
-        auto b = imagePoints.at(i);
-        // this makes the line coordinates inconsistant, but this should not be a serious problem
-        if(a.y > imgHeight_)
-            a.y = imgHeight_ - 1;
-        if(b.y > imgHeight_)
-            b.y = imgHeight_ - 1;
-
-        currentMiddleLine_.push_back(Line(a, b, newMidLinePts.at(i - 1), newMidLinePts.at(i), Line::LineType::MIDDLE_LINE));
-    }
-
-    // validate our new guess
-    if(!currentMiddleLine_.empty()) {
-        if(currentMiddleLine_.at(currentMiddleLine_.size() - 1).wP2_.x < 0.5) {
-            // our guess is too short, it is better to use the default one; TODO: bad idea -> RECOVER state
-            currentMiddleLine_.clear();
-        } else if((currentMiddleLine_.at(0).getAngle() < 1.0) || (currentMiddleLine_.at(0).getAngle() > 2.6)) {
-            // the angle of the first segment is weird (TODO: workaround for now, why can this happen?)
-            // if we have more than one segment, then we just delete the first
-            if(currentMiddleLine_.size() > 1) {
-                currentMiddleLine_.erase(currentMiddleLine_.begin());
-            } else {
-                // otherwise throw the guess away
-                currentMiddleLine_.clear();
-            }
-        }
-
-        bool done = false;
-        for(size_t i = 1; i < currentMiddleLine_.size() && !done; i++) {
-            // angles between two connected segments should be plausible
-            if(std::abs(currentMiddleLine_.at(i - 1).getAngle() - currentMiddleLine_.at(i).getAngle()) > 0.8) {
-                // 0.8 = 45 degree
-                // todo: clear whole line or just to this segment?
-                currentMiddleLine_.erase(currentMiddleLine_.begin() + i, currentMiddleLine_.end());
-                //        ROS_INFO_STREAM("clipped line because of angle difference");
-                done = true;
-            } else if(currentMiddleLine_.at(i).wP2_.x > maxViewRange_) {
-                //        ROS_INFO_STREAM("clipped line because of maxViewRange_");
-                currentMiddleLine_.erase(currentMiddleLine_.begin() + i, currentMiddleLine_.end());
-                done = true;
-            }
-            else if((i < (currentMiddleLine_.size() - 1)) && currentMiddleLine_.at(i).getLength() > 0.3) {
-                // we build middle line segments of max 0.25m, so this is a test; TODO: overthink this
-                // excluding the last segment, since we created this for searching forward
-                //        ROS_INFO_STREAM("clipped line because of length");
-                currentMiddleLine_.erase(currentMiddleLine_.begin() + i, currentMiddleLine_.end());
-                done = true;
-            }
-        }
-    }
-
-    publishDebugLines(currentMiddleLine_);
-
-    // publish points to road topic
-    // TODO: we want to publish not only the middle line, but also start line, stop lines, intersections, barred areas, ...
-    // todo: we should do this outside this function inside the imageCallback
-    drive_ros_msgs::RoadLine msgMidLine;
-    msgMidLine.lineType = drive_ros_msgs::RoadLine::MIDDLE;
-    for(auto l : currentMiddleLine_) {
-        geometry_msgs::PointStamped pt1, pt2;
-        pt1.point.x = l.wP1_.x;
-        pt1.point.y = l.wP1_.y;
-        msgMidLine.points.push_back(pt1);
-        pt2.point.x = l.wP2_.x;
-        pt2.point.y = l.wP2_.y;
-        msgMidLine.points.push_back(pt2);
-    }
-
-    line_output_pub_.publish(msgMidLine);
-}
-
-bool LineDetection::findIntersectionExit(std::vector<Line> &lines) {
-    std::vector<Line> potMidLines;
-
-    // we keep current current middle line
-    // todo: we should check if the middle line is plausible
-    if(currentMiddleLine_.size() == 0) {
-        ROS_WARN("No middle line");
-        return false;
-    }
-    for(auto l : lines) {
-        if(std::abs(l.getAngle() - currentMiddleLine_.at(0).getAngle()) < (M_PI / 8)) {
-            l.lineType_ = Line::LineType::UNKNOWN;
-            potMidLines.push_back(l);
-        }
-    }
-
-    determineLineTypes(potMidLines, currentMiddleLine_);
-    float closestLineDist = 10.0f;
-    Line *closestMiddleLine;
-    bool foundLeft = false, foundMiddle = false, foundRight = false;
-    for(auto l : potMidLines) {
-        foundLeft |= l.lineType_ == Line::LineType::LEFT_LINE;
-        foundMiddle |= l.lineType_ == Line::LineType::MIDDLE_LINE;
-        foundRight |= l.lineType_ == Line::LineType::RIGHT_LINE;
-
-        if(l.wMid_.x < closestLineDist) {
-            closestLineDist = l.wMid_.x;
-            closestMiddleLine = &l;
-        }
-    }
-
-    ROS_INFO_STREAM("Closest line dist = " << closestLineDist);
-    ROS_INFO_STREAM("found left: " << foundLeft << "\tfound middle: " << foundMiddle << "\tfound right: " << foundRight);
-
-    if(foundLeft && foundMiddle && foundRight) {
-        closestMiddleLine->lineType_ = Line::LineType::GUESS;
-        potMidLines.push_back(*closestMiddleLine);
-        driveState = DriveState::Street;
-    }
-
-    publishDebugLines(currentMiddleLine_);
-    publishDebugLines(potMidLines);
-
-    // todo: ideas: 1) detect opposite stop line as end of intersection
-    //              2) usu odometry and knowledge about intersection size (line_width * 2)
-    return true;
-}
-
-void LineDetection::determineLineTypes(std::vector<Line> &lines, std::vector<Line> &currentGuess) {
-    for(auto lineIt = lines.begin(); lineIt != lines.end(); ++lineIt) {
-        Line segment = currentGuess.at(0);
-        bool isInSegment = false;
-        // find the corresponding segment
-        // todo: this only uses the x-coordinate right now, improve this
-        for(size_t i = 0; (i < currentGuess.size()) && !isInSegment; i++) {
-            segment = currentGuess.at(i);
-            if(lineIt->wMid_.x > segment.wP1_.x) {
-                if(lineIt->wMid_.x < segment.wP2_.x) {
-                    isInSegment = true;
-                }
-            } else if(lineIt->wMid_.x > segment.wP2_.x) {
-                isInSegment = true;
-            }
-        }
-
-        if(isInSegment) {
-            // classify the line
-            if(std::abs(lineIt->getAngle() - segment.getAngle()) < lineAngle_) {
-                // lane width is 0.35 to 0.45 [m]
-                // todo: distance should be calculated based on orthogonal distance.
-                // the current approach leads to problems in curves
-                auto absDistanceToMidLine = std::abs(lineIt->wMid_.y - segment.wMid_.y);
-                if(absDistanceToMidLine < (lineWidth_ * 0.33)) {
-                    lineIt->lineType_ = Line::LineType::MIDDLE_LINE;
-                } else if((lineIt->wMid_.y < segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
-                    lineIt->lineType_ = Line::LineType::RIGHT_LINE;
-                } else if((lineIt->wMid_.y > segment.wMid_.y) && (std::abs(absDistanceToMidLine - lineWidth_) < lineVar_)) {
-                    lineIt->lineType_ = Line::LineType::LEFT_LINE;
-                }
-            } else {
-                classifyHorizontalLine(&*lineIt, segment.wMid_.y - lineIt->wMid_.y); // convert iterator to pointer
-            }
-        }
-    }
-}
-
-void LineDetection::classifyHorizontalLine(Line *line, float worldDistToMiddleLine) {
-    if(worldDistToMiddleLine < -lineWidth_) {
-        line->lineType_ = Line::LineType::HORIZONTAL_OUTER_LEFT;
-    } else if(worldDistToMiddleLine < 0) {
-        line->lineType_ = Line::LineType::HORIZONTAL_LEFT_LANE;
-    } else if(worldDistToMiddleLine < lineWidth_) {
-        line->lineType_ = Line::LineType::HORIZONTAL_RIGHT_LANE;
-    } else {
-        line->lineType_ = Line::LineType::HORIZONTAL_OUTER_RIGHT;
-    }
-}
-
-void LineDetection::buildBbAroundLines(std::vector<cv::Point2f> &centerPoints, std::vector<cv::Point2f> &midLinePoints) {
-    auto rect = cv::minAreaRect(centerPoints);
-    cv::Point2f a, b;
-    cv::Point2f vertices2f[4];
-    rect.points(vertices2f);
-
-    // use the long side as line
-    if(std::abs(vertices2f[0].x - vertices2f[1].x) > std::abs(vertices2f[1].x - vertices2f[2].x)) {
-        a = vertices2f[0];
-        b = vertices2f[1];
-    } else {
-        a = vertices2f[1];
-        b = vertices2f[2];
-    }
-    // ensures the correct order of the points in newMidLinePts vector
-    if(a.x > b.x) {
-        midLinePoints.push_back(b);
-        midLinePoints.push_back(a);
-    } else {
-        midLinePoints.push_back(a);
-        midLinePoints.push_back(b);
-    }
-}
-
-void LineDetection::publishDebugLines(std::vector<Line> &lines) {
-    for(auto it = lines.begin(); it != lines.end(); ++it) {
-        if(it->lineType_ == Line::LineType::MIDDLE_LINE)
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA); // Green
-        else if((it->lineType_ == Line::LineType::LEFT_LINE) || (it->lineType_ == Line::LineType::RIGHT_LINE))
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA); // Blue
-        else if(it->lineType_ == Line::LineType::STOP_LINE)
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255), 2, cv::LINE_AA); // Red
-        else if(it->lineType_ == Line::LineType::START_LINE)
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(0, 204, 255), 2, cv::LINE_AA); // Cyan
-        else if(it->lineType_ == Line::LineType::HORIZONTAL_OUTER_LEFT)
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255, 255), 2, cv::LINE_AA); // Yellow
-        else if(it->lineType_ == Line::LineType::HORIZONTAL_OUTER_RIGHT)
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255, 153, 51), 2, cv::LINE_AA); // Orange
-        else if(it->lineType_ == Line::LineType::GUESS)
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(153, 0, 204), 2, cv::LINE_AA); // Purple
-        else
-            cv::line(debugImg_, it->iP1_, it->iP2_, cv::Scalar(255, 51, 204), 2, cv::LINE_AA); // Pink
-    }
 }
 
 ///
@@ -627,14 +690,16 @@ void LineDetection::publishDebugLines(std::vector<Line> &lines) {
 ///
 void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level){
     image_operator_.setConfig(config);
-    lineWidth_ = config.lineWidth;
+    laneWidthWorld_ = config.lineWidth;
     lineAngle_ = config.lineAngle;
     lineVar_ = config.lineVar;
-    maxViewRange_ = config.maxSenseRange;
+    maxSenseRange_ = config.maxSenseRange;
     cannyThreshold_ = config.cannyThreshold;
     houghThresold_ = config.houghThreshold;
     houghMinLineLen_ = config.houghMinLineLen;
     houghMaxLineGap_ = config.houghMaxLineGap;
+    segmentLength_ = config.segmentLength;
+    maxRansacInterations_ = config.ransacIterations;
 }
 
 } // namespace drive_ros_image_recognition
