@@ -2,12 +2,13 @@
     <arg name="incoming_image" default="/camera/image_raw"/>
     <arg name="camera_info" default="/camera/camera_info"/>
     <arg name="homography_topic" default="/camera/camera_homography"/>
+    <arg name="odometry_topic" default="/visual_odom/odom"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
 
     <!-- forward output to [screen|log] -->
-    <arg name="output" default="screen"/>
+    <arg name="output" default="screen"></arg>
 
     <arg if="$(arg debug)" name="launch-prefix" value="gdb -ex run --args"/>
     <arg unless="$(arg debug)" name="launch-prefix" value=""/>
@@ -16,6 +17,7 @@
         <node name="line_detection" pkg="drive_ros_image_recognition" type="line_detection_node" respawn="false" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
             <remap from="img_in" to="$(arg incoming_image)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
+            <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
@@ -34,5 +36,8 @@
     <include file="$(find drive_ros_ximea_importer)/launch/homography_publisher.launch">
         <arg name="homography_topic" value="$(arg homography_topic)"/>
     </include>
+
+	<!-- TODO: this launch file and the odometry should be starten from upper level launch file to set odom topic -->    
+    <!-- include file="$(find drive_ros_localize_visual_odometry)/launch/simple_visual_odometry.launch" -->
 
 </launch>

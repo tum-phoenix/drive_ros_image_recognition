@@ -3,6 +3,7 @@
 
 #include <ros/ros.h>
 #include <sensor_msgs/image_encodings.h>
+#include <nav_msgs/Odometry.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <cv_bridge/cv_bridge.h>
@@ -41,6 +42,7 @@ private:
   ImageOperator image_operator_;
   int imgHeight_;
   int imgWidth_;
+  ros::Time imgTimestamp;
 #ifdef PUBLISH_DEBUG
   cv::Mat debugImg_;
 #endif
@@ -50,6 +52,7 @@ private:
   image_transport::Subscriber imageSubscriber_;
   ros::Publisher line_output_pub_;
   ros::Subscriber homography_params_sub_;
+  ros::Subscriber odometrySub;
 #ifdef PUBLISH_DEBUG
   image_transport::Publisher debugImgPub_;
 #endif
@@ -65,9 +68,13 @@ private:
   // odometry components
   tf::TransformListener tfListener_;
   cv::Point2f oldPoint_;
+  nav_msgs::Odometry lastUsedOdometry;
+  nav_msgs::Odometry latestOdometry;
+  bool odometryInitialized = false;
 
   // callbacks
   void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
+  void odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg);
   void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
   dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
   dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig>::CallbackType dsrv_cb_;
@@ -92,7 +99,6 @@ private:
   Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle);
   bool findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
   		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
-  bool segmentIsPlausible(Segment *segmentToAdd, bool isFirstSegment);
 
 #ifdef PUBLISH_DEBUG
   void drawDebugLines(std::vector<Line> &lines);
