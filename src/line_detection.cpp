@@ -9,6 +9,7 @@
 #include "drive_ros_image_recognition/line_detection.h"
 #include "drive_ros_image_recognition/geometry_common.h"
 #include "drive_ros_msgs/RoadLine.h"
+#include "drive_ros_msgs/simple_trajectory.h"
 
 namespace drive_ros_image_recognition {
 
@@ -49,6 +50,9 @@ bool LineDetection::init() {
 
     line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLine>("roadLine", 10);
     ROS_INFO_STREAM("Advertising road line on " << line_output_pub_.getTopic());
+
+    trajectoryPub = nh_.advertise<drive_ros_msgs::simple_trajectory>("trajectory_point", 1);
+    ROS_INFO("Publish trajectory point on topic '%s'", trajectoryPub.getTopic().c_str());
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_ = imageTransport_.advertise("debug_image", 3);
@@ -92,8 +96,16 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
 
     std::vector<Line> linesInImage;
     findLinesWithHough(homographedImg, linesInImage);
+    auto drivingLine = findLaneMarkings(linesInImage);
 
-    findLaneMarkings(linesInImage);
+
+    // Publish the trajectory
+    cv::Point2f trajPoint = findTrajectoryPoint(drivingLine);
+    drive_ros_msgs::simple_trajectory trajMsg;
+    trajMsg.v = targetVelocity;
+    trajMsg.phi = atan2(trajPoint.x, trajPoint.y);
+
+    trajectoryPub.publish(trajMsg);
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
@@ -105,7 +117,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     //  ROS_INFO_STREAM("Cycle time: " << (std::chrono::duration<double, std::milli>(t_end-t_start).count()) << "ms");
 }
 
-void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
+std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     cv::Point2f segStartWorld(0.3f, 0.f);
     float segAngle = 0.f;
     float totalSegLength = 0.f;
@@ -184,10 +196,12 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 //    ROS_INFO("Detection range = %.2f", totalSegLength);
     roadModel.addSegments(foundSegments, imgTimestamp);
 
+    auto transformedLane = roadModel.getDrivingLinePts();
+
 #ifdef PUBLISH_DEBUG
     worldPts.clear();
     imgPts.clear();
-    auto transformedLane = roadModel.getDrivingLinePts();
+
     if(!transformedLane.empty()) {
     	for(int i = 0; i < transformedLane.size(); i++) {
     		worldPts.push_back(cv::Point2f(transformedLane.at(i).x(), transformedLane.at(i).y()));
@@ -232,6 +246,8 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 //    	cv::line(debugImg_, m->iP1_, m->iP2_, cv::Scalar(0,180), 2, cv::LINE_AA);
 //    }
 #endif
+
+    return transformedLane;
 }
 
 ///
@@ -627,6 +643,28 @@ bool LineDetection::findIntersection(Segment &resultingSegment, float segmentAng
 	return foundIntersection;
 }
 
+cv::Point2f LineDetection::findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine) {
+	if(drivingLine.empty()) {
+		return cv::Point2f(1.f, 0.f);
+	}
+
+	for(int i = 1; i < drivingLine.size(); i++) {
+		auto fst = drivingLine.at(i-1);
+		auto snd = drivingLine.at(i);
+		if((snd.x()*snd.x() + snd.y()*snd.y()) > trajectoryDist*trajectoryDist) {
+			cv::Point2f direction(snd.x() - fst.x(), snd.y() - fst.y());
+			direction /= (sqrt(direction.x*direction.x + direction.y*direction.y));
+			float distToFst = sqrt(fst.x()*fst.x() + fst.y()*fst.y());
+			float interpolationLen = trajectoryDist - distToFst;
+			cv::Point2f finalTrajPoint(fst.x() + direction.x*interpolationLen, fst.y() + direction.y*interpolationLen);
+			return finalTrajPoint;
+		}
+	}
+
+	auto lastPt = drivingLine.back();
+	return cv::Point2f(lastPt.x(), lastPt.y());
+}
+
 ///
 /// \brief LineDetection::findLinesWithHough
 /// Extract Lines from the image using Hough Lines
@@ -722,6 +760,8 @@ void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
     houghMaxLineGap_ = config.houghMaxLineGap;
     segmentLength_ = config.segmentLength;
     maxRansacInterations_ = config.ransacIterations;
+    trajectoryDist = config.trajectory_dist;
+    targetVelocity = config.target_velocity;
 }
 
 } // namespace drive_ros_image_recognition

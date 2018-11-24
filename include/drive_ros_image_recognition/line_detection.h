@@ -36,6 +36,8 @@ private:
   int houghMaxLineGap_;
   float segmentLength_;
   size_t maxRansacInterations_;
+  float trajectoryDist;
+  float targetVelocity;
 
   // variables
   RoadModel roadModel;
@@ -51,6 +53,7 @@ private:
   image_transport::ImageTransport imageTransport_;
   image_transport::Subscriber imageSubscriber_;
   ros::Publisher line_output_pub_;
+  ros::Publisher trajectoryPub;
   ros::Subscriber homography_params_sub_;
   ros::Subscriber odometrySub;
 #ifdef PUBLISH_DEBUG
@@ -81,7 +84,7 @@ private:
 
   // methods
   void findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLines);
-  void findLaneMarkings(std::vector<Line> &lines);
+  std::vector<tf::Stamped<tf::Point>> findLaneMarkings(std::vector<Line> &lines);
 
   // helper functions
   float getDistanceBetweenPoints(const cv::Point2f a, const cv::Point2f b) {
@@ -99,6 +102,7 @@ private:
   Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle);
   bool findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
   		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
+  cv::Point2f findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine);
 
 #ifdef PUBLISH_DEBUG
   void drawDebugLines(std::vector<Line> &lines);
