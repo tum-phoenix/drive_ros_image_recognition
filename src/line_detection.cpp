@@ -103,7 +103,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     cv::Point2f trajPoint = findTrajectoryPoint(drivingLine);
     drive_ros_msgs::simple_trajectory trajMsg;
     trajMsg.v = targetVelocity;
-    trajMsg.phi = atan2(trajPoint.x, trajPoint.y);
+    trajMsg.phi = atan2(trajPoint.y, trajPoint.x);
 
     trajectoryPub.publish(trajMsg);
 
