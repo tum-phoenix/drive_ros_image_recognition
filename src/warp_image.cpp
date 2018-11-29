@@ -3,9 +3,10 @@
 
 namespace drive_ros_image_recognition {
 
-WarpContent::WarpContent(const ros::NodeHandle& nh, const ros::NodeHandle& pnh):
+WarpContent::WarpContent(const ros::NodeHandle& nh, const ros::NodeHandle& pnh, bool nodelet):
   nh_(nh),
   pnh_(pnh),
+  nodelet_(nodelet),
   current_image_(),
   cam_mat_(3,3,CV_64F,cv::Scalar(0.0)),
   dist_coeffs_(8,1,CV_64F,cv::Scalar(0.0)),
@@ -109,9 +110,12 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
   cv::Mat output_mat;
   cv::warpPerspective(undistorted_mat, output_mat, scaling_mat_, transformed_size_, cv::WARP_INVERSE_MAP);
 #ifdef DRAW_DEBUG
-  cv::namedWindow("Homographied",CV_WINDOW_NORMAL);
-  cv::imshow("Homographied",output_mat);
-  cv::waitKey(1);
+  if (!nodelet_)
+  {
+    cv::namedWindow("Homographied",CV_WINDOW_NORMAL);
+    cv::imshow("Homographied",output_mat);
+    cv::waitKey(1);
+  }
 #endif
 
   img_pub_.publish(cv_bridge::CvImage(msg->header, output_encoding_str, output_mat).toImageMsg());
@@ -119,7 +123,7 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
 
 void WarpImageNodelet::onInit()
 {
-  my_content_.reset(new WarpContent(getNodeHandle(),ros::NodeHandle(getPrivateNodeHandle())));
+  my_content_.reset(new WarpContent(getNodeHandle(),ros::NodeHandle(getPrivateNodeHandle()), true));
   if (!my_content_->init()) {
     ROS_ERROR("WarpImageNodelet failed to initialize!");
     // nodelet failing will kill the entire loader anyway

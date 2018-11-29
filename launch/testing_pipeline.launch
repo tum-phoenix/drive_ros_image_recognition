@@ -4,6 +4,7 @@
     <arg name="warped_image_topic" default="/warped_image"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
+    <arg name="run_python" default="false"/>
 
     <node pkg="rosbag" type="play" name="player" output="screen" args="--clock $(arg bag_file)"/>
 
@@ -24,5 +25,6 @@
         <arg name="img_in" value="$(arg warped_image_topic)"/>
         <arg name="use_nodelet" value="$(arg use_nodelet)"/>
         <arg name="nodelet_manager" value="$(arg manager_used)"/>
+        <arg name="run_python" value="$(arg run_python)"/>
     </include>
 </launch>

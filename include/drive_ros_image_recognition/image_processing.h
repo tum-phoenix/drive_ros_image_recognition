@@ -10,10 +10,11 @@ namespace drive_ros_image_recognition {
 class ImageProcessing
 {
 public:
-  ImageProcessing(ros::NodeHandle nh, ros::NodeHandle pnh);
+  ImageProcessing(ros::NodeHandle nh, ros::NodeHandle pnh, bool nodelet=false);
 private:
   void imageCallback(const sensor_msgs::ImageConstPtr &msg);
   image_transport::Subscriber img_sub_;
+  bool nodelet_;
 };
 
 class ImageProcessingNodelet : public nodelet::Nodelet {

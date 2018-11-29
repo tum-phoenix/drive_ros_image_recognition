@@ -3,19 +3,30 @@
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
 
+    <arg name="run_python" default="false"/>
+    <arg if="$(arg run_python)" name="node_type" value="image_processing_node.py"/>
+    <arg unless="$(arg run_python)" name="node_type" value="image_processing_node"/>
+
     <group unless="$(arg use_nodelet)">
-        <node name="image_processing_node" pkg="drive_ros_image_recognition" type="image_processing_node" respawn="false" output="screen">
+        <node name="image_processing_node" pkg="drive_ros_image_recognition" type="$(arg node_type)" respawn="false" output="screen">
             <remap from="~/img_in" to="$(arg img_in)"/>
         </node>
     </group>
 
     <group if="$(arg use_nodelet)">
-        <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="image_processing_nodelet_manager"/>
-        <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
+        <group unless="$(arg run_python)">
+            <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="image_processing_nodelet_manager"/>
+            <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
 
-        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="image_processing_nodelet_manager"  args="manager" output="screen"/>
-        <node pkg="nodelet" type="nodelet" name="image_processing_nodelet" args="load drive_ros_image_recognition/ImageProcessingNodelet $(arg manager_used)" output="screen">
-            <remap from="~/img_in" to="$(arg img_in)"/>
-        </node>
+            <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="image_processing_nodelet_manager"  args="manager" output="screen"/>
+            <node pkg="nodelet" type="nodelet" name="image_processing_nodelet" args="load drive_ros_image_recognition/ImageProcessingNodelet $(arg manager_used)" output="screen">
+                <remap from="~/img_in" to="$(arg img_in)"/>
+            </node>
+        </group>
+        <group if="$(arg run_python)">
+            <node name="image_processing_node" pkg="drive_ros_image_recognition" type="$(arg node_type)" respawn="false" output="screen">
+                <remap from="~/img_in" to="$(arg img_in)"/>
+            </node>
+        </group>
     </group>
 </launch>

@@ -145,6 +145,11 @@ install(TARGETS warp_image_nodelet
 ################################################################################
 # Install other files
 ################################################################################
+ install(PROGRAMS
+   scripts/image_processing_node.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
+
 install(FILES nodelets.xml
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
     )

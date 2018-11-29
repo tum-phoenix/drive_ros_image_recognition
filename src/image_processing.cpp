@@ -7,7 +7,7 @@
 
 namespace drive_ros_image_recognition {
 
-ImageProcessing::ImageProcessing(ros::NodeHandle nh, ros::NodeHandle pnh)
+ImageProcessing::ImageProcessing(ros::NodeHandle nh, ros::NodeHandle pnh, bool nodelet) : nodelet_(nodelet)
 {
   image_transport::ImageTransport it(pnh);
   img_sub_ = it.subscribe("img_in", 1, &ImageProcessing::imageCallback, this);
@@ -27,14 +27,19 @@ void ImageProcessing::imageCallback(const sensor_msgs::ImageConstPtr &msg)
   }
 
   // example content: display incoming image
-  cv::Mat img_in = cv_ptr->image;
-  cv::namedWindow("Incoming image", CV_WINDOW_NORMAL);
-  cv::imshow("Incoming image", img_in);
+  // (NOTE: default OpenCV functions don't work with nodelets as they are not suited for multi-threaded applications)
+  if (!nodelet_)
+  {
+    cv::Mat img_in = cv_ptr->image;
+    cv::namedWindow("Incoming image", CV_WINDOW_NORMAL);
+    cv::imshow("Incoming image", img_in);
+    cv::waitKey(1);
+  }
 }
 
 void ImageProcessingNodelet::onInit()
 {
-  img_proc_.reset(new ImageProcessing(getNodeHandle(), getPrivateNodeHandle()));;
+  img_proc_.reset(new ImageProcessing(getNodeHandle(), getPrivateNodeHandle(), true));;
 }
 
 } // namespace drive_ros_image_recognition
