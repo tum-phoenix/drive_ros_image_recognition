@@ -60,8 +60,10 @@ bool WarpContent::init() {
 
   homography_params_sub_ = nh_.subscribe<drive_ros_msgs::Homography>("homography_in", 1,
                                           boost::bind(homography_callback, _1,
-                                                      std::ref(cam2world_), std::ref(world2cam_), std::ref(scaling_mat_),
-                                                      std::ref(scaling_mat_inv_), std::ref(homo_received_), std::ref(scaling_mat_init_)));
+                                                      std::ref(cam2world_), std::ref(world2cam_),
+                                                      std::ref(scaling_mat_),
+                                                      std::ref(scaling_mat_inv_), std::ref(homo_received_),
+                                                      std::ref(scaling_mat_init_)));
   // initialize combined subscriber for camera image and model
   cam_sub_ = it_.subscribeCamera("img_in", 10, &WarpContent::world_image_callback, this);
   return true;
@@ -93,7 +95,7 @@ void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg,
   if (output_image_type_ == CV_8UC3)
     cv::cvtColor(undistorted_mat, undistorted_mat, CV_GRAY2BGR);
   else
-    ROS_INFO_STREAM("Unsupported output image type "<<output_image_type_<<" using default: "<<CV_8UC1<<" instead");
+    ROS_DEBUG_STREAM("Unsupported output image type "<<output_image_type_<<" using default: "<<CV_8UC1<<" instead");
   std::string output_encoding_str = sensor_msgs::image_encodings::TYPE_8UC1;
   if (output_image_type_ == CV_8UC3)
     output_encoding_str = sensor_msgs::image_encodings::BGR8;
