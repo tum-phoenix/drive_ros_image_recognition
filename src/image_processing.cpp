@@ -27,7 +27,7 @@ void ImageProcessing::imageCallback(const sensor_msgs::ImageConstPtr &msg)
   }
 
   // example content: display incoming image
-  // (NOTE: default OpenCV functions don't work with nodelets as they are not suited for multi-threaded applications)
+  // (NOTE: default OpenCV display functions don't work with nodelets as they are not suited for multi-threaded applications)
   if (!nodelet_)
   {
     cv::Mat img_in = cv_ptr->image;
