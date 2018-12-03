@@ -301,7 +301,7 @@ public:
       return false;
     }
     dstImg = cv::Mat::zeros( srcImg.rows, srcImg.cols, srcImg.type() );
-    cv::warpPerspective(srcImg, dstImg, scaledCam2world_, transformed_size_);
+    cv::warpPerspective(srcImg, dstImg, cam2world_, transformed_size_);
     return true;
   }
 
