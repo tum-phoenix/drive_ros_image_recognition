@@ -23,13 +23,16 @@ find_package(catkin REQUIRED COMPONENTS
     sensor_msgs
     drive_ros_msgs
     nodelet
+    dynamic_reconfigure
+    tf
 )
 
 #include Boost for lane line processing
 find_package(Boost REQUIRED)
 
-#generate_dynamic_reconfigure_options(
-#)
+generate_dynamic_reconfigure_options(
+    cfg/LineDetection.cfg
+)
 
 catkin_package(
   INCLUDE_DIRS include
