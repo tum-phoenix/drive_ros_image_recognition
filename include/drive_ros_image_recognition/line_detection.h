@@ -75,6 +75,8 @@ private:
   nav_msgs::Odometry latestOdometry;
   bool odometryInitialized = false;
 
+  cv::Mat prevPolyCoeff;
+
   // callbacks
   void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
   void odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg);

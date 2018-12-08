@@ -3,6 +3,46 @@
 
 namespace drive_ros_image_recognition {
 
+void RoadModel::addLanePoints(std::vector<cv::Point2f> &lanePoints, ros::Time stamp) {
+	if(lanePoints.empty())
+		return;
+
+	Polynom currentPoly(3, lanePoints);
+
+	float maxXRange =
+			std::max_element(
+					lanePoints.begin(),
+					lanePoints.end(),
+					[](cv::Point2f &fst, cv::Point2f &scd) { return fst.x < fst.y; }
+	)->x;
+
+	std::vector<tf::Stamped<tf::Point>> stampedPrevPoints;
+	float stepSize = dl.detectionRange / 10;
+	for(int i = 2; i < dl.detectionRange / stepSize; i++) {
+		float x = stepSize * i;
+		tf::Stamped<tf::Point> p, newP;
+		p.frame_id_ = "/rear_axis_middle_ground";
+		p.stamp_ = dl.stamp;
+		p.setX(x);
+		p.setY(dl.poly.atX(x));
+		p.setZ(0.0);
+
+
+		try {
+			pTfListener->transformPoint("/rear_axis_middle_ground", p, newP);
+
+		}
+		catch (tf::TransformException &ex){
+			ROS_ERROR("%s",ex.what());
+			continue;
+		}
+
+		ROS_INFO_STREAM("Transformed (" << p.x() <<"," << p.y() << ") to (" << newP.x() << "," << newP.y() << ")");
+	}
+
+	dl = DrivingLane(currentPoly, maxXRange, stamp);
+}
+
 void RoadModel::getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const {
 	// DEBUG
 	for(int i = 0; i < drivingLine.size(); i++) {
@@ -207,7 +247,11 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 	std::vector<Segment> updatedDrivingLine;
 	float drivingLineLength = 0.f;
 
+	std::vector<cv::Point2f> ptsForPoly;
+
 	for(auto s : newSegments) {
+		ptsForPoly.push_back(s.positionWorld);
+
 		// The new segments already had a plausibility check
 
 		// Transform the points to the /odom frame
@@ -239,6 +283,8 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 			break;
 		}
 	}
+
+	addLanePoints(ptsForPoly, timestamp);
 
 	// If the new driving line is too short add some segments from the previous one
 	if(drivingLineLength < 1.0f) {

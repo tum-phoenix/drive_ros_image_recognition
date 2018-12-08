@@ -3,6 +3,7 @@
 
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+#include "drive_ros_image_recognition/polynom.hpp"
 #include "drive_ros_image_recognition/line.h"
 #include "drive_ros_image_recognition/common_image_operations.h"
 
@@ -50,9 +51,28 @@ struct Segment {
     };
 };
 
+struct DrivingLane {
+	ros::Time stamp;
+	float detectionRange;
+	Polynom poly;
+
+	DrivingLane()
+	: detectionRange(0.f)
+	{
+	}
+
+	DrivingLane(Polynom &p, float pointXRange, ros::Time &timestamp)
+	: poly(p)
+	, detectionRange(pointXRange)
+	, stamp(timestamp)
+	{
+	}
+};
+
 class RoadModel {
 	tf::TransformListener *pTfListener;
 	std::vector<Segment> drivingLine;
+	DrivingLane dl;
 
 public:
     RoadModel(tf::TransformListener *tfListener)
@@ -60,6 +80,10 @@ public:
 	{
 	}
 
+    // Poly based
+    void addLanePoints(std::vector<cv::Point2f> &lanePoints, ros::Time stamp);
+
+    // Segment based
     void addSegments(std::vector<Segment> &newSegments, ros::Time timestamp);
     void getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const;
     bool segmentFitsToPrevious(Segment *previousSegment, Segment *segmentToAdd, bool isFirstSegment);
