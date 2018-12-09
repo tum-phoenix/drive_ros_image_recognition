@@ -98,14 +98,6 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     findLinesWithHough(homographedImg, linesInImage);
     auto drivingLine = findLaneMarkings(linesInImage);
 
-    // Publish the trajectory
-    cv::Point2f trajPoint = findTrajectoryPoint(drivingLine);
-    drive_ros_msgs::simple_trajectory trajMsg;
-    trajMsg.v = targetVelocity;
-    trajMsg.phi = atan2(trajPoint.x, trajPoint.y);
-
-    trajectoryPub.publish(trajMsg);
-
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
 #endif
@@ -115,32 +107,6 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     //  auto t_end = std::chrono::high_resolution_clock::now();
     //  ROS_INFO_STREAM("Cycle time: " << (std::chrono::duration<double, std::milli>(t_end-t_start).count()) << "ms");
 }
-
-// TODO: if we use this, we have to cite it: https://github.com/kipr/opencv/blob/master/modules/contrib/src/polyfit.cpp
-void polyfit(const cv::Mat& src_x, const cv::Mat& src_y, cv::Mat& dst, int order)
-{
-    CV_Assert((src_x.rows>0)&&(src_y.rows>0)&&(src_x.cols==1)&&(src_y.cols==1)
-            &&(dst.cols==1)&&(dst.rows==(order+1))&&(order>=1));
-    cv::Mat X;
-    X = cv::Mat::zeros(src_x.rows, order+1,CV_32FC1);
-    cv::Mat copy;
-    for(int i = 0; i <=order;i++)
-    {
-        copy = src_x.clone();
-        cv::pow(copy,i,copy);
-        cv::Mat M1 = X.col(i);
-        copy.col(0).copyTo(M1);
-    }
-    cv::Mat X_t, X_inv;
-    transpose(X,X_t);
-    cv::Mat temp = X_t*X;
-    cv::Mat temp2;
-    invert (temp,temp2);
-    cv::Mat temp3 = temp2*X_t;
-    cv::Mat W = temp3*src_y;
-    W.copyTo(dst);
-}
-
 
 std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     cv::Point2f segStartWorld(0.3f, 0.f);
@@ -239,33 +205,33 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
     	}
     }
 
-//    if(foundSegments.size() > 0) {
-//    	// ego lane in orange
-//    	cv::circle(debugImg_, foundSegments.at(0).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
-//    	// left lane marking in purple
-//    	cv::circle(debugImg_, foundSegments.at(0).leftPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-//    	// right lane marking in purple
-//    	cv::circle(debugImg_, foundSegments.at(0).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-//    	// mid lane marking in yellow
-//    	cv::circle(debugImg_, foundSegments.at(0).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
-//    }
-//
-//    for(int i = 1; i < foundSegments.size(); i++) {
-//    	// ego lane in orange
-//    	cv::circle(debugImg_, foundSegments.at(i).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
-//    	cv::line(debugImg_, foundSegments.at(i-1).positionImage, foundSegments.at(i).positionImage, cv::Scalar(255,128), 2, cv::LINE_AA);
-//    	if(!foundSegments.at(i).isIntersection() && !foundSegments.at(i-1).isIntersection()) {
-//    		// left lane marking in purple
-//    		cv::line(debugImg_, foundSegments.at(i-1).leftPosI, foundSegments.at(i).leftPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
-//    		cv::circle(debugImg_, foundSegments.at(i).leftPosI, 3, cv::Scalar(153, 0, 204), 1, cv::LINE_AA);
-//    		// right lane marking in purple
-//    		cv::line(debugImg_, foundSegments.at(i-1).rightPosI, foundSegments.at(i).rightPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
-//    		cv::circle(debugImg_, foundSegments.at(i).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-//    		// mid lane marking in yellow
-//    		cv::line(debugImg_, foundSegments.at(i-1).midPosI, foundSegments.at(i).midPosI, cv::Scalar(255,255), 2, cv::LINE_AA);
-//    		cv::circle(debugImg_, foundSegments.at(i).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
-//    	}
-//    }
+    if(foundSegments.size() > 0) {
+    	// ego lane in orange
+    	cv::circle(debugImg_, foundSegments.at(0).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
+    	// left lane marking in purple
+    	cv::circle(debugImg_, foundSegments.at(0).leftPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+    	// right lane marking in purple
+    	cv::circle(debugImg_, foundSegments.at(0).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+    	// mid lane marking in yellow
+    	cv::circle(debugImg_, foundSegments.at(0).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
+    }
+
+    for(int i = 1; i < foundSegments.size(); i++) {
+    	// ego lane in orange
+    	cv::circle(debugImg_, foundSegments.at(i).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
+    	cv::line(debugImg_, foundSegments.at(i-1).positionImage, foundSegments.at(i).positionImage, cv::Scalar(255,128), 2, cv::LINE_AA);
+    	if(!foundSegments.at(i).isIntersection() && !foundSegments.at(i-1).isIntersection()) {
+    		// left lane marking in purple
+    		cv::line(debugImg_, foundSegments.at(i-1).leftPosI, foundSegments.at(i).leftPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
+    		cv::circle(debugImg_, foundSegments.at(i).leftPosI, 3, cv::Scalar(153, 0, 204), 1, cv::LINE_AA);
+    		// right lane marking in purple
+    		cv::line(debugImg_, foundSegments.at(i-1).rightPosI, foundSegments.at(i).rightPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
+    		cv::circle(debugImg_, foundSegments.at(i).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+    		// mid lane marking in yellow
+    		cv::line(debugImg_, foundSegments.at(i-1).midPosI, foundSegments.at(i).midPosI, cv::Scalar(255,255), 2, cv::LINE_AA);
+    		cv::circle(debugImg_, foundSegments.at(i).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
+    	}
+    }
 
 //    for(auto m : unusedLines) {
 //    	cv::line(debugImg_, m->iP1_, m->iP2_, cv::Scalar(0,180), 2, cv::LINE_AA);
@@ -322,14 +288,14 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
     }
 
 #ifdef PUBLISH_DEBUG
-//    for(int i = 0; i < 3; i++) {
-//    	auto r = regions.at(i);
-//        cv::Point2f edges[4];
-//        r.points(edges);
-//
-//        for(int i = 0; i < 4; i++)
-//            cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255));
-//    }
+    for(int i = 0; i < 3; i++) {
+    	auto r = regions.at(i);
+        cv::Point2f edges[4];
+        r.points(edges);
+
+        for(int i = 0; i < 4; i++)
+            cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255));
+    }
 #endif
 
     return regions;
@@ -682,78 +648,78 @@ bool LineDetection::findIntersection(Segment &resultingSegment, float segmentAng
 	return foundIntersection;
 }
 
-cv::Point2f LineDetection::findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine) {
-	if(drivingLine.empty()) {
-		return cv::Point2f(1.f, 0.f);
-	}
-
-	// TEST POLYFIT
-	int order = 4;
-	cv::Mat srcX(drivingLine.size(), 1, CV_32FC1);
-	cv::Mat srcY(drivingLine.size(), 1, CV_32FC1);
-	cv::Mat dst(order+1, 1, CV_32FC1);
-
-	for(int i = 0; i < drivingLine.size(); i++) {
-		srcX.at<float>(i, 0) = drivingLine.at(i).x();
-		srcY.at<float>(i, 0) = drivingLine.at(i).y();
-	}
-
-//	ROS_INFO_STREAM("srcX dims = " << srcX.size << "; srcY dims = " << srcY.size << "; dst dims = " << dst.size);
-	polyfit(srcX, srcY, dst, order);
-//	ROS_INFO_STREAM("PolyFit = " << dst);
-
-	std::vector<cv::Point2f> imagePoints, worldPoints;
-
-	ROS_INFO("----------------------------");
-	if(prevPolyCoeff.rows == (order+1)) {
-		auto a = prevPolyCoeff.at<float>(0,0);
-		auto b = prevPolyCoeff.at<float>(1,0);
-		auto c = prevPolyCoeff.at<float>(2,0);
-		auto d = prevPolyCoeff.at<float>(3,0);
-		auto e = prevPolyCoeff.at<float>(4,0);
-
-		for(int i = 2; i < 10; i++) {
-			auto x = i * 0.2;
-			worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
-		}
-
-	}
-
-	prevPolyCoeff = dst;
-
-	auto a = dst.at<float>(0,0);
-	auto b = dst.at<float>(1,0);
-	auto c = dst.at<float>(2,0);
-	auto d = dst.at<float>(3,0);
-	auto e = dst.at<float>(4,0);
-
-	for(int i = 2; i < 10; i++) {
-		auto x = i * 0.2;
-		worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
-	}
-
-	// COMPARE THE POLYNOMS
-	float sqrdError = 0.f;
-	for(int i = 0; i < worldPoints.size() / 2; i++) {
-		auto xDiff = worldPoints.at(i).x - worldPoints.at(i + worldPoints.size()/2).x;
-		auto yDiff = worldPoints.at(i).y - worldPoints.at(i + worldPoints.size()/2).y;
-		sqrdError += xDiff*xDiff + yDiff*yDiff;
-	}
-
-	ROS_INFO("Error = %f", sqrt(sqrdError));
-
-	image_operator_.worldToWarpedImg(worldPoints, imagePoints);
-	for(int i = 0; i < imagePoints.size(); i++) {
-//	for(auto p : imagePoints) {
-		cv::circle(debugImg_, imagePoints.at(i), 5,
-				(i<8) ? cv::Scalar(0,0,255) : cv::Scalar(0,255),
-				2, cv::LINE_AA);
-	}
-
-
-	float x = trajectoryDist;
-	return cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a);
-}
+//cv::Point2f LineDetection::findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine) {
+//	if(drivingLine.empty()) {
+//		return cv::Point2f(1.f, 0.f);
+//	}
+//
+//	// TEST POLYFIT
+//	int order = 4;
+//	cv::Mat srcX(drivingLine.size(), 1, CV_32FC1);
+//	cv::Mat srcY(drivingLine.size(), 1, CV_32FC1);
+//	cv::Mat dst(order+1, 1, CV_32FC1);
+//
+//	for(int i = 0; i < drivingLine.size(); i++) {
+//		srcX.at<float>(i, 0) = drivingLine.at(i).x();
+//		srcY.at<float>(i, 0) = drivingLine.at(i).y();
+//	}
+//
+////	ROS_INFO_STREAM("srcX dims = " << srcX.size << "; srcY dims = " << srcY.size << "; dst dims = " << dst.size);
+//	polyfit(srcX, srcY, dst, order);
+////	ROS_INFO_STREAM("PolyFit = " << dst);
+//
+//	std::vector<cv::Point2f> imagePoints, worldPoints;
+//
+//	ROS_INFO("----------------------------");
+//	if(prevPolyCoeff.rows == (order+1)) {
+//		auto a = prevPolyCoeff.at<float>(0,0);
+//		auto b = prevPolyCoeff.at<float>(1,0);
+//		auto c = prevPolyCoeff.at<float>(2,0);
+//		auto d = prevPolyCoeff.at<float>(3,0);
+//		auto e = prevPolyCoeff.at<float>(4,0);
+//
+//		for(int i = 2; i < 10; i++) {
+//			auto x = i * 0.2;
+//			worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
+//		}
+//
+//	}
+//
+//	prevPolyCoeff = dst;
+//
+//	auto a = dst.at<float>(0,0);
+//	auto b = dst.at<float>(1,0);
+//	auto c = dst.at<float>(2,0);
+//	auto d = dst.at<float>(3,0);
+//	auto e = dst.at<float>(4,0);
+//
+//	for(int i = 2; i < 10; i++) {
+//		auto x = i * 0.2;
+//		worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
+//	}
+//
+//	// COMPARE THE POLYNOMS
+//	float sqrdError = 0.f;
+//	for(int i = 0; i < worldPoints.size() / 2; i++) {
+//		auto xDiff = worldPoints.at(i).x - worldPoints.at(i + worldPoints.size()/2).x;
+//		auto yDiff = worldPoints.at(i).y - worldPoints.at(i + worldPoints.size()/2).y;
+//		sqrdError += xDiff*xDiff + yDiff*yDiff;
+//	}
+//
+//	ROS_INFO("Error = %f", sqrt(sqrdError));
+//
+//	image_operator_.worldToWarpedImg(worldPoints, imagePoints);
+//	for(int i = 0; i < imagePoints.size(); i++) {
+////	for(auto p : imagePoints) {
+//		cv::circle(debugImg_, imagePoints.at(i), 5,
+//				(i<8) ? cv::Scalar(0,0,255) : cv::Scalar(0,255),
+//				2, cv::LINE_AA);
+//	}
+//
+//
+//	float x = trajectoryDist;
+//	return cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a);
+//}
 
 ///
 /// \brief LineDetection::findLinesWithHough

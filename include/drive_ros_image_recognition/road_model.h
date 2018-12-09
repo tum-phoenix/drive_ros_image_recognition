@@ -15,6 +15,18 @@ enum SegmentType {
 	NORMAL_ROAD, INTERSECTION_STOP, INTERSECTION_GO_STRAIGHT
 };
 
+void transformOdomPointsToRearAxis(
+		tf::TransformListener *pTfListener,
+		std::vector<tf::Stamped<tf::Point>> &odomPts,
+		std::vector<tf::Stamped<tf::Point>> &rearAxisPts,
+		ros::Time stamp);
+
+void transformRearAxisPointsToOdom(
+		tf::TransformListener *pTfListener,
+		std::vector<cv::Point2f> &rearAxisPts,
+		std::vector<tf::Stamped<tf::Point>> &odomPts,
+		ros::Time stamp);
+
 struct Segment {
     cv::Point2f positionWorld;
     cv::Point2f positionImage;
@@ -73,6 +85,7 @@ class RoadModel {
 	tf::TransformListener *pTfListener;
 	std::vector<Segment> drivingLine;
 	DrivingLane dl;
+	int noNewSegmentsCtr = 0; // DEBUG
 
 public:
     RoadModel(tf::TransformListener *tfListener)

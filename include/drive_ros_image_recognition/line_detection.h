@@ -104,7 +104,6 @@ private:
   Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle);
   bool findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
   		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
-  cv::Point2f findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine);
 
 #ifdef PUBLISH_DEBUG
   void drawDebugLines(std::vector<Line> &lines);

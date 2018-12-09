@@ -60,7 +60,7 @@ public:
 		cv::Mat W = temp3*srcY;
 		W.copyTo(dst);
 
-		coeffs.resize(order);
+		coeffs.resize(order + 1);
 		for(int i = 0; i < order; i++) {
 			coeffs.at(i) = dst.at<float>(i,0);
 		}
