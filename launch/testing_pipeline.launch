@@ -1,12 +1,14 @@
 <launch>
-    <arg name="bag_file" default="/home/phoenix/Downloads/drive_2017-11-18-14-50-05_bosch_big_track_2.bag"/>
+    <arg name="bag_file" default="/media/mgladkova/Elements/Mariia/Phoenix_ROSbags/drive_2017-11-18-14-50-05_bosch_big_track_2.bag"/>
     <arg name="bag_image_topic" default="/camera/image_raw"/>
     <arg name="warped_image_topic" default="/warped_image"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
     <arg name="run_python" default="false"/>
 
-    <node pkg="rosbag" type="play" name="player" output="screen" args="--clock $(arg bag_file)"/>
+    <include file="$(find drive_ros_ximea_importer)/launch/homography_publisher.launch">
+        <arg name="vehicle" value="cc2017_car"/>
+    </include>
 
     <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="testing_pipeline_nodelet_manager"/>
     <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
