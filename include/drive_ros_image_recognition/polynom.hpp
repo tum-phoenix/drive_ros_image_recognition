@@ -80,6 +80,10 @@ public:
 
 		return result;
 	}
+
+	inline int getOrder() { return order; }
+	inline std::vector<float> getCoeffs() { return coeffs; }
+
 };
 
 

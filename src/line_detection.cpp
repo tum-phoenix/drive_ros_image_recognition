@@ -10,6 +10,7 @@
 #include "drive_ros_image_recognition/geometry_common.h"
 #include "drive_ros_msgs/RoadLine.h"
 #include "drive_ros_msgs/simple_trajectory.h"
+#include "drive_ros_msgs/DrivingLine.h"
 
 namespace drive_ros_image_recognition {
 
@@ -54,6 +55,9 @@ bool LineDetection::init() {
     trajectoryPub = nh_.advertise<drive_ros_msgs::simple_trajectory>("trajectory_point", 1);
     ROS_INFO("Publish trajectory point on topic '%s'", trajectoryPub.getTopic().c_str());
 
+    drivingLinePub = nh_.advertise<drive_ros_msgs::DrivingLine>("driving_line_topic", 1);
+    ROS_INFO("Publish driving line on topic '%s'", drivingLinePub.getTopic().c_str());
+
 #ifdef PUBLISH_DEBUG
     debugImgPub_ = imageTransport_.advertise("debug_image", 3);
     ROS_INFO_STREAM("Publishing debug image on topic " << debugImgPub_.getTopic());
@@ -97,6 +101,18 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     std::vector<Line> linesInImage;
     findLinesWithHough(homographedImg, linesInImage);
     auto drivingLine = findLaneMarkings(linesInImage);
+
+
+    drive_ros_msgs::DrivingLine drivingLineMsg;
+    auto dl = roadModel.getDrivingLine();
+    drivingLineMsg.detectionRange = dl.detectionRange;
+    drivingLineMsg.polynom_order = dl.poly.getOrder();
+
+    for(auto c : dl.poly.getCoeffs()) {
+    	drivingLineMsg.polynom_params.push_back(c);
+    }
+
+    drivingLinePub.publish(drivingLineMsg);
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());

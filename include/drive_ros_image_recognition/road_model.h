@@ -96,6 +96,8 @@ public:
     // Poly based
     void addLanePoints(std::vector<cv::Point2f> &lanePoints, ros::Time stamp);
 
+    DrivingLane getDrivingLine() { return dl; }
+
     // Segment based
     void addSegments(std::vector<Segment> &newSegments, ros::Time timestamp);
     void getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const;
