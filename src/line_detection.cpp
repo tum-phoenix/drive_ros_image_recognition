@@ -49,12 +49,6 @@ bool LineDetection::init() {
     odometrySub = pnh_.subscribe("odom_topic", 3, &LineDetection::odometryCallback, this);
     ROS_INFO("Subscribing to odometry on topic '%s'", odometrySub.getTopic().c_str());
 
-    line_output_pub_ = nh_.advertise<drive_ros_msgs::RoadLine>("roadLine", 10);
-    ROS_INFO_STREAM("Advertising road line on " << line_output_pub_.getTopic());
-
-    trajectoryPub = nh_.advertise<drive_ros_msgs::simple_trajectory>("trajectory_point", 1);
-    ROS_INFO("Publish trajectory point on topic '%s'", trajectoryPub.getTopic().c_str());
-
     drivingLinePub = nh_.advertise<drive_ros_msgs::DrivingLine>("driving_line_topic", 1);
     ROS_INFO("Publish driving line on topic '%s'", drivingLinePub.getTopic().c_str());
 

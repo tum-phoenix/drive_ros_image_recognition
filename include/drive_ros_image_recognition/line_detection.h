@@ -52,8 +52,6 @@ private:
   // communication
   image_transport::ImageTransport imageTransport_;
   image_transport::Subscriber imageSubscriber_;
-  ros::Publisher line_output_pub_;
-  ros::Publisher trajectoryPub;
   ros::Subscriber homography_params_sub_;
   ros::Subscriber odometrySub;
   ros::Publisher drivingLinePub;
