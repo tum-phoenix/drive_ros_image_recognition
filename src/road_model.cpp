@@ -65,216 +65,21 @@ void transformRearAxisPointsToOdom(
  * 					ROAD MODEL
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
-void RoadModel::addLanePoints(std::vector<cv::Point2f> &lanePoints, ros::Time stamp) {
-	if(lanePoints.empty())
-		return;
-
-	Polynom currentPoly(3, lanePoints);
-
-	float maxXRange =
-			std::max_element(
-					lanePoints.begin(),
-					lanePoints.end(),
-					[](cv::Point2f &fst, cv::Point2f &scd) { return fst.x > fst.y; }
-	)->x;
-
-	std::vector<tf::Stamped<tf::Point>> stampedPrevPoints;
-	float stepSize = dl.detectionRange / 10;
-	for(int i = 2; i < dl.detectionRange / stepSize; i++) {
-		float x = stepSize * i;
-		tf::Stamped<tf::Point> p, newP;
-		p.frame_id_ = "/rear_axis_middle_ground";
-		p.stamp_ = dl.stamp;
-		p.setX(x);
-		p.setY(dl.poly.atX(x));
-		p.setZ(0.0);
-
-
-		try {
-			pTfListener->transformPoint("/rear_axis_middle_ground", p, newP);
-
-		}
-		catch (tf::TransformException &ex){
-			ROS_ERROR("%s",ex.what());
-			continue;
-		}
-	}
-
-	dl = DrivingLane(currentPoly, maxXRange, stamp);
-}
-
 void RoadModel::getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const {
-	// DEBUG
-	for(int i = 0; i < drivingLine.size(); i++) {
-		if(drivingLine.at(i).isIntersection()) {
-			ROS_INFO_STREAM("=== SearchStart: IntersectionSegment is at " << i << "/" << drivingLine.size());
-		}
-	}
-
-//	auto intersectionSegment = std::find_if(drivingLine.begin(), drivingLine.end(), [](Segment s){ return s.isIntersection(); });
-//	// If an intersection exists, start searching for segments after it
-//	if(intersectionSegment != drivingLine.end()) {
-//		if(intersectionSegment == (drivingLine.end() - 1)) {
-//			ROS_INFO("Create the intersection exit point");
-//			// We do not have any segment after the intersection
-//			tf::Stamped<tf::Point> p;
-//
-//			try {
-//				pTfListener->transformPoint("/rear_axis_middle_ground", intersectionSegment->odomPosition, p);
-//			}
-//			catch (tf::TransformException &ex){
-//				ROS_ERROR("%s",ex.what());
-//			}
-//
-//			// Guess the intersection exit position
-//			posWorld.x = p.x() + (1.f * cos(intersectionSegment->angleTotal));
-//			posWorld.y = p.y() + (1.f * sin(intersectionSegment->angleTotal));
-//			angle = intersectionSegment->angleTotal;
-//			ROS_INFO("(%f, %f)", posWorld.x, posWorld.y);
-//			return;
-//
-//		} else {
-//			ROS_INFO("Return segment after intersection");
-//			// Select the first segment after the intersection
-//			auto searchStartSeg = intersectionSegment + 1;
-//
-//			tf::Stamped<tf::Point> p;
-//
-//			try {
-//				pTfListener->transformPoint("/rear_axis_middle_ground", searchStartSeg->odomPosition, p);
-//			}
-//			catch (tf::TransformException &ex){
-//				ROS_ERROR("%s",ex.what());
-//			}
-//
-//			posWorld.x = p.x();
-//			posWorld.y = p.y();
-//			angle = searchStartSeg->angleTotal;
-//			ROS_INFO("(%f, %f)", posWorld.x, posWorld.y);
-//			return;
-//		}
-//	}
-
 	if(noNewSegmentsCtr < 6) {
-		// If there is no intersection select the first segment
-		for(auto s : drivingLine) {
-			tf::Stamped<tf::Point> p;
+		posWorld.x = 0.4f;
+		posWorld.y = dl.poly.atX(posWorld.x);
+		angle = dl.poly.getFstDeviationAtX(posWorld.x);
 
-			try {
-				pTfListener->transformPoint("/rear_axis_middle_ground", s.odomPosition, p);
-			}
-			catch (tf::TransformException &ex){
-				ROS_ERROR("%s",ex.what());
-				continue;
-			}
+		ROS_INFO("Start search angle is %.1f[deg]", angle * 180.f / M_PI);
 
-			// Find the first segment which is in front of the car
-			if(p.x() > 0.2f && (std::abs(p.y()) < 0.3f)) {
-				// If the segment is too far away translate if towards the car
-				if(p.x() > 0.5f) {
-					//				ROS_WARN_STREAM("First segment is too far away: " << s.positionWorld);
-					float moveDistance = sqrt(p.x()*p.x() + p.y()*p.y());
-					moveDistance -= 0.3f;
-
-					posWorld.x = p.x() - (moveDistance * cos(s.angleTotal));
-					posWorld.y = p.y() - (moveDistance * sin(s.angleTotal));
-
-				} else {
-					posWorld.x = p.x();
-					posWorld.y = p.y();
-				}
-
-				angle = s.angleTotal;
-				return;
-			}
-		}
+		// TODO: what do to if there is an intersection very close? -> is this handled by BT?
+	} else {
+		// If we have not found a suitable segment, return some default values
+		posWorld.x = 0.3f;
+		posWorld.y = 0.f;
+		angle = 0.f;
 	}
-
-	// If we have not found a suitable segment, return some default values
-	posWorld.x = 0.3f;
-	posWorld.y = 0.f;
-	angle = 0.f;
-
-	return;
-}
-
-std::vector<tf::Stamped<tf::Point>> RoadModel::getDrivingLinePts() {
-	// DEBUG
-	for(int i = 0; i < drivingLine.size(); i++) {
-		if(drivingLine.at(i).isIntersection()) {
-			ROS_INFO_STREAM("=== DrivingLinePts: IntersectionSegment is at " << i << "/" << drivingLine.size());
-		}
-	}
-
-	std::vector<tf::Stamped<tf::Point>> drivingLinePts;
-	float drivingLineLength = 0.f;
-
-	// If we found an intersection aim for the exit
-	// TODO: actually, we should aim for the entry (and check if we have to stop) and then aim for the exit
-//	auto intersectionSegment = std::find_if(drivingLine.begin(), drivingLine.end(), [](Segment s){ return s.isIntersection(); });
-//	if(intersectionSegment != drivingLine.end()) {
-//		ROS_INFO("Intersection (%s) exists - aim for exit",
-//				intersectionSegment->segmentType == SegmentType::INTERSECTION_GO_STRAIGHT ? "GO" : "STOP");
-//
-//		if(intersectionSegment == (drivingLine.end() - 1)) {
-//			// We do not have any segment after the intersection
-//			tf::Stamped<tf::Point> p;
-//
-//			try {
-//				pTfListener->transformPoint("/rear_axis_middle_ground", intersectionSegment->odomPosition, p);
-//			}
-//			catch (tf::TransformException &ex){
-//				ROS_ERROR("%s",ex.what());
-//			}
-//
-//			// Guess the intersection exit position
-//			tf::Stamped<tf::Point> interpolatedPt;
-//			interpolatedPt.setX(p.x() + (1.f * cos(intersectionSegment->angleTotal)));
-//			interpolatedPt.setY(p.y() + (1.f * sin(intersectionSegment->angleTotal)));
-//			drivingLinePts.push_back(interpolatedPt);
-//			auto dist = sqrt(interpolatedPt.x()*interpolatedPt.x() + interpolatedPt.y()*interpolatedPt.y());
-//			drivingLineLength = dist;
-//
-//		} else {
-//			// Select the first segment after the intersection
-//			auto searchStartSeg = intersectionSegment + 1;
-//
-//			tf::Stamped<tf::Point> p;
-//
-//			try {
-//				pTfListener->transformPoint("/rear_axis_middle_ground", searchStartSeg->odomPosition, p);
-//			}
-//			catch (tf::TransformException &ex){
-//				ROS_ERROR("%s",ex.what());
-//			}
-//
-//			auto dist = sqrt(p.x()*p.x() + p.y()*p.y());
-//			drivingLineLength = dist;
-//			drivingLinePts.push_back(p);
-//		}
-//	}
-
-	// The actual driving line (if an intersection exists, we ignore segments before it)
-	for(auto s : drivingLine) {
-		tf::Stamped<tf::Point> p;
-
-		try {
-			pTfListener->transformPoint("/rear_axis_middle_ground", s.odomPosition, p);
-		}
-		catch (tf::TransformException &ex){
-			ROS_ERROR("%s",ex.what());
-			continue;
-		}
-
-		// Make sure our driving line continuously goes to the front
-		auto dist = sqrt(p.x()*p.x() + p.y()*p.y());
-		if(dist > drivingLineLength) {
-			drivingLinePts.push_back(p);
-			drivingLineLength = dist;
-		}
-	}
-
-	return drivingLinePts;
 }
 
 bool RoadModel::segmentFitsToPrevious(Segment *previousSegment, Segment *segmentToAdd, bool isFirstSegment) {
@@ -300,13 +105,9 @@ bool RoadModel::segmentFitsToPrevious(Segment *previousSegment, Segment *segment
 }
 
 void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timestamp) {
-	std::vector<Segment> updatedDrivingLine;
-	float drivingLineLength = 0.f;
-
 	if(newSegments.empty()) {
 		ROS_INFO("!!! No new segments");
 		noNewSegmentsCtr++;
-		// TODO: reset the driving line after not getting new segments for X frames
 	} else {
 		noNewSegmentsCtr = 0;
 
@@ -315,10 +116,16 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 
 		for(auto s : newSegments) {
 			ptsForPoly.push_back(s.positionWorld);
+
+			if(s.isIntersection()) {
+				ROS_INFO("Got an intersection segment");
+				break;
+			}
 		}
 
 		Polynom newPoly(3, ptsForPoly);
 
+		// TODO: could probably be done in for loop over segments above
 		float newDetectionRange =
 				std::max_element(
 						ptsForPoly.begin(),
@@ -326,8 +133,12 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 						[](cv::Point2f &fst, cv::Point2f &scd) { return fst.x > fst.y; }
 				)->x;
 
-		// 2) Compare the current driving line with the new segment
-		// TODO: the old polynom is perfectly correct since the ignore the cars movement
+		if(newDetectionRange < 0.5f) {
+			return;
+		}
+
+		// 2) Compare the current driving line polynom with the one
+		// TODO: the old polynom is not perfectly correct since we ignore the cars movement
 		float compareRange = std::min(dl.detectionRange, newDetectionRange);
 		int steps = 10;
 		float step = compareRange / steps;
@@ -340,85 +151,33 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 			error += std::sqrt(diff*diff);
 		}
 
+		ROS_INFO("---");
 		ROS_INFO("Old range = %.1f", dl.detectionRange);
 		ROS_INFO("New range = %.1f", newDetectionRange);
 		ROS_INFO("Poly diff = %.2f", error);
 
-		// 3) Add the new segments to the driving line
-		for(auto s : newSegments) {
-			// The new segments already had a plausibility check
+		// TODO: maybe combine both polys
 
-			// Transform the points to the /odom frame
-			tf::Stamped<tf::Point> p;
-			p.frame_id_ = "/rear_axis_middle_ground";
-			p.stamp_ = timestamp;
-			p.setX(s.positionWorld.x);
-			p.setY(s.positionWorld.y);
-			p.setZ(0.0);
+		dl = DrivingLane(newPoly, newDetectionRange, timestamp);
+	}
+}
 
-			//			target_frame	The frame into which to transform
-			//			source_frame	The frame from which to transform
-			//			time	The time at which to transform
-			//			timeout	How long to block before failing
-			if(pTfListener->waitForTransform("/odom", p.frame_id_, timestamp, ros::Duration(0.1))) {
-				try {
-					pTfListener->transformPoint("/odom", p, s.odomPosition);
+std::vector<tf::Stamped<tf::Point>> RoadModel::getDrivingLinePts() {
+	float currentX = 0.4f;
+	std::vector<tf::Stamped<tf::Point>> linePts;
 
-				}
-				catch (tf::TransformException &ex){
-					ROS_ERROR("%s",ex.what());
-					continue;
-				}
+	while(currentX < dl.detectionRange) {
+		tf::Stamped<tf::Point> pt;
 
-				updatedDrivingLine.push_back(s);
-				drivingLineLength = sqrt(p.x()*p.x() + p.y()*p.y());
-			} else {
-				ROS_ERROR("waitForTransform timed out in RoadModel::addSegments");
-				break;
-			}
-		}
+		pt.setX(currentX);
+		pt.setY(dl.poly.atX(currentX));
 
-		addLanePoints(ptsForPoly, timestamp);
+		linePts.push_back(pt);
 
+		currentX += 0.1f;
 	}
 
-	// 4) If the new driving line is too short add some segments from the previous one
-	if(drivingLineLength < 1.0f) {
-		for(auto s : drivingLine) {
-			tf::Stamped<tf::Point> p;
-
-			// Transform the point from /odom to /rear_axis_middle_ground
-			try {
-				pTfListener->transformPoint("/rear_axis_middle_ground", s.odomPosition, p);
-			}
-			catch (tf::TransformException &ex){
-				ROS_ERROR("%s",ex.what());
-				continue;
-			}
-
-			auto dist = sqrt(p.x()*p.x() + p.y()*p.y());
-			if(dist > drivingLineLength) {
-				// Only use the previous driving line up to a certain distance
-				if(dist < 1.8f) {
-					// Check if the old segments fits to the current driving line
-					if(segmentFitsToPrevious(
-							updatedDrivingLine.empty() ? nullptr : &updatedDrivingLine.back(),
-							&s,
-							updatedDrivingLine.empty()))
-					{
-						updatedDrivingLine.push_back(s);
-					}
-
-				} else {
-					// Break if the old segment is too far away
-					break;
-				}
-			}
-		}
-	}
-
-	// 5) Set the new driving line
-	drivingLine = updatedDrivingLine;
+	return linePts;
 }
 
 } // namespace drive_ros_image_recognition

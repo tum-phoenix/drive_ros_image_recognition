@@ -210,38 +210,38 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
     	image_operator_.worldToWarpedImg(worldPts, imgPts);
 
     	for(int i = 1; i < imgPts.size(); i++) {
-    		cv::circle(debugImg_, imgPts.at(i), 5, cv::Scalar(255,128), 2, cv::LINE_AA);
-        	cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), cv::Scalar(255,128), 2, cv::LINE_AA);
+    		cv::circle(debugImg_, imgPts.at(i), 5, cv::Scalar(0,0,255), 2, cv::LINE_AA);
+        	cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), cv::Scalar(0,0,255), 2, cv::LINE_AA);
     	}
     }
 
-    if(foundSegments.size() > 0) {
-    	// ego lane in orange
-    	cv::circle(debugImg_, foundSegments.at(0).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
-    	// left lane marking in purple
-    	cv::circle(debugImg_, foundSegments.at(0).leftPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-    	// right lane marking in purple
-    	cv::circle(debugImg_, foundSegments.at(0).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-    	// mid lane marking in yellow
-    	cv::circle(debugImg_, foundSegments.at(0).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
-    }
-
-    for(int i = 1; i < foundSegments.size(); i++) {
-    	// ego lane in orange
-    	cv::circle(debugImg_, foundSegments.at(i).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
-    	cv::line(debugImg_, foundSegments.at(i-1).positionImage, foundSegments.at(i).positionImage, cv::Scalar(255,128), 2, cv::LINE_AA);
-    	if(!foundSegments.at(i).isIntersection() && !foundSegments.at(i-1).isIntersection()) {
-    		// left lane marking in purple
-    		cv::line(debugImg_, foundSegments.at(i-1).leftPosI, foundSegments.at(i).leftPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
-    		cv::circle(debugImg_, foundSegments.at(i).leftPosI, 3, cv::Scalar(153, 0, 204), 1, cv::LINE_AA);
-    		// right lane marking in purple
-    		cv::line(debugImg_, foundSegments.at(i-1).rightPosI, foundSegments.at(i).rightPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
-    		cv::circle(debugImg_, foundSegments.at(i).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-    		// mid lane marking in yellow
-    		cv::line(debugImg_, foundSegments.at(i-1).midPosI, foundSegments.at(i).midPosI, cv::Scalar(255,255), 2, cv::LINE_AA);
-    		cv::circle(debugImg_, foundSegments.at(i).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
-    	}
-    }
+//    if(foundSegments.size() > 0) {
+//    	// ego lane in orange
+//    	cv::circle(debugImg_, foundSegments.at(0).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
+////    	// left lane marking in purple
+////    	cv::circle(debugImg_, foundSegments.at(0).leftPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+////    	// right lane marking in purple
+////    	cv::circle(debugImg_, foundSegments.at(0).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+////    	// mid lane marking in yellow
+////    	cv::circle(debugImg_, foundSegments.at(0).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
+//    }
+//
+//    for(int i = 1; i < foundSegments.size(); i++) {
+//    	// ego lane in orange
+//    	cv::circle(debugImg_, foundSegments.at(i).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
+//    	cv::line(debugImg_, foundSegments.at(i-1).positionImage, foundSegments.at(i).positionImage, cv::Scalar(255,128), 2, cv::LINE_AA);
+////    	if(!foundSegments.at(i).isIntersection() && !foundSegments.at(i-1).isIntersection()) {
+////    		// left lane marking in purple
+////    		cv::line(debugImg_, foundSegments.at(i-1).leftPosI, foundSegments.at(i).leftPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
+////    		cv::circle(debugImg_, foundSegments.at(i).leftPosI, 3, cv::Scalar(153, 0, 204), 1, cv::LINE_AA);
+////    		// right lane marking in purple
+////    		cv::line(debugImg_, foundSegments.at(i-1).rightPosI, foundSegments.at(i).rightPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
+////    		cv::circle(debugImg_, foundSegments.at(i).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
+////    		// mid lane marking in yellow
+////    		cv::line(debugImg_, foundSegments.at(i-1).midPosI, foundSegments.at(i).midPosI, cv::Scalar(255,255), 2, cv::LINE_AA);
+////    		cv::circle(debugImg_, foundSegments.at(i).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
+////    	}
+//    }
 
 //    for(auto m : unusedLines) {
 //    	cv::line(debugImg_, m->iP1_, m->iP2_, cv::Scalar(0,180), 2, cv::LINE_AA);
@@ -298,14 +298,14 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
     }
 
 #ifdef PUBLISH_DEBUG
-    for(int i = 0; i < 3; i++) {
-    	auto r = regions.at(i);
-        cv::Point2f edges[4];
-        r.points(edges);
-
-        for(int i = 0; i < 4; i++)
-            cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255));
-    }
+//    for(int i = 0; i < 3; i++) {
+//    	auto r = regions.at(i);
+//        cv::Point2f edges[4];
+//        r.points(edges);
+//
+//        for(int i = 0; i < 4; i++)
+//            cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255));
+//    }
 #endif
 
     return regions;

@@ -19,6 +19,7 @@ public:
 
 	Polynom()
 	: order(0)
+	, coeffs(1, 0.f)
 	{
 
 	}
@@ -61,18 +62,31 @@ public:
 		W.copyTo(dst);
 
 		coeffs.resize(order + 1);
-		for(int i = 0; i < order; i++) {
+		for(int i = 0; i <= order; i++) {
 			coeffs.at(i) = dst.at<float>(i,0);
 		}
 
 	}
 
-	float atX(float x) {
+	float atX(float x) const {
 		float result = 0.f;
 
-		for(int i = 0; i < order; i++) {
+		for(int i = 0; i <= order; i++) {
 			float tmp = coeffs.at(i);
 			for(int j = 0; j < i; j++) {
+				tmp *= x;
+			}
+			result += tmp;
+		}
+
+		return result;
+	}
+
+	float getFstDeviationAtX(float x) const {
+		float result = 0.f;
+		for(int i = 1; i <= order; i++) {
+			float tmp = coeffs.at(i) * i;
+			for(int j = 1; j < i; j++) {
 				tmp *= x;
 			}
 			result += tmp;
