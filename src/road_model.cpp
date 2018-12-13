@@ -133,13 +133,14 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 						[](cv::Point2f &fst, cv::Point2f &scd) { return fst.x > fst.y; }
 				)->x;
 
-		if(newDetectionRange < 0.5f) {
+		if(newDetectionRange < 0.8f) {
 			return;
 		}
 
 		// 2) Compare the current driving line polynom with the one
 		// TODO: the old polynom is not perfectly correct since we ignore the cars movement
 		float compareRange = std::min(dl.detectionRange, newDetectionRange);
+		compareRange = 1.f;
 		int steps = 10;
 		float step = compareRange / steps;
 		float error = 0.f;
@@ -156,7 +157,7 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 		ROS_INFO("New range = %.1f", newDetectionRange);
 		ROS_INFO("Poly diff = %.2f", error);
 
-		// TODO: maybe combine both polys
+		// TODO: maybe take history over polys and weight them based on age
 
 		dl = DrivingLane(newPoly, newDetectionRange, timestamp);
 	}
