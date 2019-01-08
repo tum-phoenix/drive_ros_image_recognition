@@ -133,7 +133,7 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 						[](cv::Point2f &fst, cv::Point2f &scd) { return fst.x > fst.y; }
 				)->x;
 
-		if(newDetectionRange < 0.8f) {
+		if(newDetectionRange < 0.5f) {
 			return;
 		}
 

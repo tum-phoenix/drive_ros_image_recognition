@@ -108,8 +108,31 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
 
     drivingLinePub.publish(drivingLineMsg);
 
+    cv::Mat draw_image = homographedImg.clone();
+    ROS_INFO_STREAM("Polynom range: "<<drivingLineMsg.detectionRange<<" order "<<dl.poly.getOrder()<<", "<<drivingLineMsg.polynom_order);
+    std::vector<cv::Point2f> warped_image_points;
+    for (float i=0.0; i<drivingLineMsg.detectionRange; i+=0.1) {
+        float marker_pos_y = 0.0;
+        for (int j=0; j<drivingLineMsg.polynom_order; j++)
+            marker_pos_y += std::pow(i, j)*drivingLineMsg.polynom_params[j];
+        ROS_INFO_STREAM("Warped marker at: "<<cv::Point2f(i, marker_pos_y));
+        warped_image_points.push_back(cv::Point2f(i, marker_pos_y));
+    }
+//    std::vector<cv::Point2f> unwarped_image_points;
+//    image_operator_.warpedImgToWorld(warped_image_points, unwarped_image_points);
+//    for (auto point: unwarped_image_points) {
+//        ROS_INFO_STREAM("Unwarped marker at: "<<point);
+//        cv::drawMarker(draw_image, cv::Point(point.x, point.y), cv::Scalar(255), cv::MARKER_CROSS, 50, 3);
+//    }
+//    cv::namedWindow("Polynom in image", cv::WINDOW_NORMAL);
+//    cv::imshow("Polynom in image", draw_image);
+//    cv::waitKey(0);
+
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
+    cv::namedWindow("Polynom in image", cv::WINDOW_NORMAL);
+    cv::imshow("Polynom in image", debugImg_);
+    cv::waitKey(0);
 #endif
 
     //  auto t_start = std::chrono::high_resolution_clock::now();
@@ -168,7 +191,6 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
         segStartWorld.x = seg.positionWorld.x + cos(seg.angleTotal) * seg.length;
         segStartWorld.y = seg.positionWorld.y + sin(seg.angleTotal) * seg.length;
 
-
         // ================================
         // Search for an intersection
 		// ================================
@@ -184,6 +206,7 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
         		segStartWorld.x = intersectionSegment.positionWorld.x + cos(intersectionSegment.angleTotal) * intersectionSegment.length;
 				segStartWorld.y = intersectionSegment.positionWorld.y + sin(intersectionSegment.angleTotal) * intersectionSegment.length;
         		findIntersectionExit = true;
+                break; // DEBUG: test if this is smarter to do since we do not want to search in the intersection
         	} else {
         		ROS_WARN("Intersection segment not plausible");
         		break;
@@ -213,6 +236,20 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
     		cv::circle(debugImg_, imgPts.at(i), 5, cv::Scalar(0,0,255), 2, cv::LINE_AA);
         	cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), cv::Scalar(0,0,255), 2, cv::LINE_AA);
     	}
+    }
+
+    std::vector<cv::Point2f> line_points;
+    std::vector<cv::Point2f> line_points_image;
+    for (float i=0.0; i<1.0; i+=0.1) {
+        line_points.clear();
+        line_points_image.clear();
+        line_points.push_back(cv::Point2f(i, -1.0));
+        line_points.push_back(cv::Point2f(i, 1.0));
+        line_points.push_back(cv::Point2f(-1.0, i));
+        line_points.push_back(cv::Point2f(1.0, i));
+        image_operator_.worldToWarpedImg(line_points, line_points_image);
+        cv::line(debugImg_, line_points_image[0], line_points_image[1], cv::Scalar(255,255,255), 2, cv::LINE_AA);
+        cv::line(debugImg_, line_points_image[2], line_points_image[3], cv::Scalar(255,255,255), 2, cv::LINE_AA);
     }
 
 //    if(foundSegments.size() > 0) {
@@ -302,7 +339,7 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
 //    	auto r = regions.at(i);
 //        cv::Point2f edges[4];
 //        r.points(edges);
-//
+
 //        for(int i = 0; i < 4; i++)
 //            cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255));
 //    }
@@ -638,21 +675,23 @@ bool LineDetection::findIntersection(Segment &resultingSegment, float segmentAng
 				drivingDirectionAngle, segmentLength, 1.0f);
 		resultingSegment.segmentType = intersectionType;
 
-		// TEST FOR POSITION
-		cv::Point2f intersectionPos(stopLineXpos * .5, segStartWorld.y);
+#ifdef PUBLISH_DEBUG
+        // TEST FOR POSITION
+        cv::Point2f intersectionPos(stopLineXpos * .5, segStartWorld.y);
 
-		worldPts.resize(4);
-		imgPts.clear();
+        worldPts.resize(4);
+        imgPts.clear();
 
-		worldPts.at(0) = cv::Point2f(intersectionPos.x, intersectionPos.y - 0.5f*laneWidthWorld_);
-		worldPts.at(1) = cv::Point2f(intersectionPos.x, intersectionPos.y + 1.5f*laneWidthWorld_);
-		worldPts.at(2) = cv::Point2f(intersectionPos.x + 2.0f*laneWidthWorld_, intersectionPos.y + 1.5f*laneWidthWorld_);
-		worldPts.at(3) = cv::Point2f(intersectionPos.x + 2.0f*laneWidthWorld_, intersectionPos.y - 0.5f*laneWidthWorld_);
-		image_operator_.worldToWarpedImg(worldPts, imgPts);
+        worldPts.at(0) = cv::Point2f(intersectionPos.x, intersectionPos.y - 0.5f*laneWidthWorld_);
+        worldPts.at(1) = cv::Point2f(intersectionPos.x, intersectionPos.y + 1.5f*laneWidthWorld_);
+        worldPts.at(2) = cv::Point2f(intersectionPos.x + 2.0f*laneWidthWorld_, intersectionPos.y + 1.5f*laneWidthWorld_);
+        worldPts.at(3) = cv::Point2f(intersectionPos.x + 2.0f*laneWidthWorld_, intersectionPos.y - 0.5f*laneWidthWorld_);
+        image_operator_.worldToWarpedImg(worldPts, imgPts);
 
-		for(int i = 0; i < 4; i++) {
-			cv::line(debugImg_, imgPts[i], imgPts[(i+1)%4], cv::Scalar(0,255));
-		}
+        for(int i = 0; i < 4; i++) {
+            cv::line(debugImg_, imgPts[i], imgPts[(i+1)%4], cv::Scalar(0,255));
+        }
+#endif
 	}
 
 	return foundIntersection;
