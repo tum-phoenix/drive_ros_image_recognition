@@ -70,6 +70,7 @@ bool LineDetection::init() {
 
 void LineDetection::odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg) {
 	latestOdometry = *odomMsg;
+//	ROS_INFO_STREAM("Odom: twist = " << latestOdometry.twist.twist << " and pose = " << latestOdometry.pose.pose);
 }
 
 ///
@@ -90,12 +91,21 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
 //    imgTimestamp = imgIn->header.stamp;
     imgTimestamp = ros::Time::now();
 
+    if(!streetMapInit) {
+    	binaryStreetMap = cv::Mat(imgHeight_, imgWidth_, CV_8UC1);
+    	streetMapInit = true;
+    }
+
 #ifdef PUBLISH_DEBUG
     cv::cvtColor(homographedImg, debugImg_, CV_GRAY2RGB);
 #endif
 
     std::vector<Line> linesInImage;
     findLinesWithHough(homographedImg, linesInImage);
+
+    createBinaryStreetMap(linesInImage, imgIn->header.stamp);
+
+#if 0
     auto drivingLine = findLaneMarkings(linesInImage);
 
     // Publish the trajectory
@@ -105,6 +115,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     trajMsg.phi = atan2(trajPoint.x, trajPoint.y);
 
     trajectoryPub.publish(trajMsg);
+#endif
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
@@ -139,6 +150,154 @@ void polyfit(const cv::Mat& src_x, const cv::Mat& src_y, cv::Mat& dst, int order
     cv::Mat temp3 = temp2*X_t;
     cv::Mat W = temp3*src_y;
     W.copyTo(dst);
+}
+
+/*
+ * In world coordinates
+ */
+float LineDetection::pointToLineDistance(Line &l, const cv::Point2f &p) {
+	// http://paulbourke.net/geometry/pointlineplane/
+
+	if(getDistanceBetweenPoints(l.wP1_, l.wP2_) == 0) {
+		ROS_WARN("Line with length 0");
+		return std::numeric_limits<float>::max();
+	}
+
+	float u = ((p.x - l.wP1_.x)*(l.wP2_.x - l.wP1_.x) + (p.y - l.wP1_.y)*(l.wP2_.y - l.wP1_.y)) /
+			   (getDistanceBetweenPoints(l.wP1_, l.wP2_));
+
+	float intersectionPointX = l.wP1_.x + u*(l.wP2_.x - l.wP1_.x);
+	float intersectionPointY = l.wP1_.y + u*(l.wP2_.y - l.wP1_.y);
+
+	return getDistanceBetweenPoints(p, cv::Point2f(intersectionPointX, intersectionPointY));
+}
+
+Line* LineDetection::closestLineToPoint(std::vector<Line> &lines, const cv::Point2f point) {
+	if(lines.empty()) {
+		ROS_WARN("lines is empty");
+		return nullptr;
+	}
+
+	auto minElem = std::min_element(lines.begin(), lines.end(), [this, point](Line &a, Line &b) {
+		return pointToLineDistance(a, point) < pointToLineDistance(b, point);
+	});
+
+	return &(*minElem);
+}
+
+float LineDetection::distanceBetweenLines(Line &a, Line &b) {
+	return	fminf(pointToLineDistance(a, b.wP1_),
+					fminf(pointToLineDistance(a, b.wP2_),
+							fminf(pointToLineDistance(b, a.wP1_), pointToLineDistance(b, a.wP2_))));
+}
+
+
+void LineDetection::createBinaryStreetMap(std::vector<Line> &lines, ros::Time stamp) {
+	ROS_INFO("=======================================");
+	std::vector<cv::Point2f> worldPoints, imagePoints;
+
+	if(!firstUpdate && !resetStreetMap) {
+		// Transform ROI from new map to previous map
+		cv::Rect2f roiInNewMap(cv::Point2f(imgHeight_ * 0.1f, imgWidth_  * 0.1f),
+							   cv::Point2f(imgHeight_ * 0.9f, imgHeight_ * 0.9f));
+
+		imagePoints.push_back(cv::Point2f(roiInNewMap.y, 					  roiInNewMap.x));
+		imagePoints.push_back(cv::Point2f(roiInNewMap.y + roiInNewMap.height, roiInNewMap.x));
+		imagePoints.push_back(cv::Point2f(roiInNewMap.y + roiInNewMap.height, roiInNewMap.x + roiInNewMap.width));
+		imagePoints.push_back(cv::Point2f(roiInNewMap.y, 					  roiInNewMap.x + roiInNewMap.width));
+
+		image_operator_.warpedImgToWorld(imagePoints, worldPoints);
+
+		for(int i = 0; i < worldPoints.size(); i++) {
+			tf::Stamped<tf::Point> oldPoint, newPoint;
+			oldPoint.frame_id_ = "/rear_axis_middle_ground";
+			oldPoint.stamp_ = ros::Time(0);
+			oldPoint.setX(worldPoints.at(i).x);
+			oldPoint.setY(worldPoints.at(i).y);
+			oldPoint.setZ(0.0);
+
+			try {
+				tfListener_.transformPoint("/rear_axis_middle_ground", // target frame
+						lastUpdate, // target time
+						oldPoint, //pin
+						"/odom", // fixed frame
+						newPoint //pout
+				);
+			} catch (tf::TransformException &ex) {
+				ROS_ERROR("%s",ex.what());
+				continue;
+			}
+
+			worldPoints.at(i).x = newPoint.x();
+			worldPoints.at(i).y = newPoint.y();
+		}
+
+		// worldPoints now contains the old corners in the new frame coordinates
+		imagePoints.clear();
+		image_operator_.worldToWarpedImg(worldPoints, imagePoints);
+
+		// Copy rotated ROI from old map to new map
+		// from: http://answers.opencv.org/question/497/extract-a-rotatedrect-area/
+		// transformed points are no perfectly rectangular anymore, therefore use 'minAreaRect'
+		cv::RotatedRect rotatedRoi = cv::minAreaRect(imagePoints);
+        // matrices we'll use
+        cv::Mat rotationMat, rotated, cropped;
+        // get angle and size from the bounding box
+        float angle = rotatedRoi.angle;
+        cv::Size rect_size = rotatedRoi.size;
+        // thanks to http://felix.abecassis.me/2011/10/opencv-rotation-deskewing/
+        if (rotatedRoi.angle < -45.) {
+            angle += 90.0;
+            cv::swap(rect_size.width, rect_size.height);
+        }
+        // get the rotation matrix
+        rotationMat = getRotationMatrix2D(rotatedRoi.center, angle, 1.0);
+        // perform the affine transformation
+        cv::warpAffine(binaryStreetMap, rotated, rotationMat, binaryStreetMap.size(), cv::INTER_CUBIC);
+        // crop the resulting image
+        cv::getRectSubPix(rotated, rect_size, rotatedRoi.center, cropped);
+
+		cv::Mat newStreetMap(binaryStreetMap.rows, binaryStreetMap.cols, binaryStreetMap.type(), cv::Scalar());
+        cropped.copyTo(newStreetMap(roiInNewMap));
+		binaryStreetMap = newStreetMap.clone();
+	}
+
+	firstUpdate = false;
+	lastUpdate = ros::Time::now();
+
+//	cv::Mat binaryStreetMap(imgHeight_, imgWidth_, CV_8UC3, cv::Scalar());
+
+	for(int j = 0; j < binaryStreetMap.rows; j++)  {
+		for (int i = 0; i < binaryStreetMap.cols; i++) {
+			binaryStreetMap.at<uchar>(j,i) = std::max(0, binaryStreetMap.at<uchar>(j,i) - (255 / 3));
+		}
+	}
+
+	for(int i = 0; i < lines.size(); i++) {
+		float lineAngle = lines.at(i).getAngle();
+		for(int j = i + 1; j < lines.size(); j++) {
+			float angleDiff = fabsf(lineAngle - lines.at(j).getAngle());
+//			ROS_INFO("Angle diff = %.2f", (angleDiff * 180.f) / M_PI);
+			if(angleDiff < ((3.f / 180.f) * M_PI)) {
+				float lineDist = distanceBetweenLines(lines.at(i), lines.at(j));
+//				ROS_INFO("Distance between lines = %.3f", distanceBetweenLines(lines.at(i), lines.at(j)));
+				if(lineDist < 0.05f && lineDist > 0.02f) {
+					// TODO: maybe make sure the two lines are beside each other, not connecting to a longer line
+//					ROS_INFO("  found two matching lines");
+//					cv::Scalar color = cv::Scalar(255,255,255);
+					int color = 255.0;
+					cv::line(binaryStreetMap, lines.at(i).iP1_, lines.at(i).iP2_, color, 2);
+					cv::line(binaryStreetMap, lines.at(j).iP1_, lines.at(j).iP2_, color, 2);
+				} else {
+//					ROS_INFO("  angle ok, distance not");
+				}
+			}
+		}
+	}
+
+	cv::namedWindow("Street Map", cv::WINDOW_KEEPRATIO | cv::WINDOW_AUTOSIZE);
+	cv::imshow("Street Map", binaryStreetMap);
+	cv::waitKey(1);
 }
 
 
@@ -789,43 +948,45 @@ void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLin
     // Build lines from points
     std::vector<Line> lines;
     for(size_t i = 0; i < worldPoints.size(); i += 2) {
-        lines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
-    }
-
-    // Split lines which are longer than segmentLength (world coordinates)
-    worldPoints.clear();
-    imagePoints.clear();
-    for(auto it = lines.begin(); it != lines.end(); ++it) {
-    	int splitInto = static_cast<int>(it->getWorldLength() / segmentLength_) + 1;
-//    	ROS_INFO_STREAM("Length = " << it->getWorldLength() << " split into " << splitInto);
-
-    	if(splitInto > 1) {
-    		// Build normalized vector
-    		cv::Vec2f dir = it->wP2_ - it->wP1_;
-    		auto length = sqrt(dir[0]*dir[0] + dir[1]*dir[1]);
-    		dir[0] = dir[0] / length;
-    		dir[1] = dir[1] / length;
-
-    		cv::Point2f curPos = it->wP1_;
-    		for(int i = 0; i < (splitInto - 1); i++) {
-    			worldPoints.push_back(curPos);
-    			curPos.x += dir[0] * segmentLength_;
-    			curPos.y += dir[1] * segmentLength_;
-    			worldPoints.push_back(curPos);
-    		}
-    		// This is the last part of the split line
-    		worldPoints.push_back(curPos);
-    		worldPoints.push_back(it->wP2_);
-    	} else {
-    		houghLines.push_back(*it);
-    	}
-    }
-
-    // Build split lines
-    image_operator_.worldToWarpedImg(worldPoints, imagePoints);
-    for(size_t i = 0; i < worldPoints.size(); i += 2) {
+//        lines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
     	houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
+        cv::line(debugImg_, imagePoints.at(i), imagePoints.at(i+1), cv::Scalar(rand() % 255, rand() % 255, rand() % 255), 2, cv::LINE_AA);
     }
+
+//    // Split lines which are longer than segmentLength (world coordinates)
+//    worldPoints.clear();
+//    imagePoints.clear();
+//    for(auto it = lines.begin(); it != lines.end(); ++it) {
+//    	int splitInto = static_cast<int>(it->getWorldLength() / segmentLength_) + 1;
+////    	ROS_INFO_STREAM("Length = " << it->getWorldLength() << " split into " << splitInto);
+//
+//    	if(splitInto > 1) {
+//    		// Build normalized vector
+//    		cv::Vec2f dir = it->wP2_ - it->wP1_;
+//    		auto length = sqrt(dir[0]*dir[0] + dir[1]*dir[1]);
+//    		dir[0] = dir[0] / length;
+//    		dir[1] = dir[1] / length;
+//
+//    		cv::Point2f curPos = it->wP1_;
+//    		for(int i = 0; i < (splitInto - 1); i++) {
+//    			worldPoints.push_back(curPos);
+//    			curPos.x += dir[0] * segmentLength_;
+//    			curPos.y += dir[1] * segmentLength_;
+//    			worldPoints.push_back(curPos);
+//    		}
+//    		// This is the last part of the split line
+//    		worldPoints.push_back(curPos);
+//    		worldPoints.push_back(it->wP2_);
+//    	} else {
+//    		houghLines.push_back(*it);
+//    	}
+//    }
+//
+//    // Build split lines
+//    image_operator_.worldToWarpedImg(worldPoints, imagePoints);
+//    for(size_t i = 0; i < worldPoints.size(); i += 2) {
+//    	houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
+//    }
 
 //    ROS_INFO_STREAM("Started with " << lines.size() << " lines, now having " << houghLines.size());
 

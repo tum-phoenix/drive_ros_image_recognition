@@ -265,7 +265,11 @@ public:
       ROS_WARN_STREAM("[imagetoWorld] Homography not received yet");
       return false;
     }
-    cv::perspectiveTransform(imagePoints, worldPoints, cam2world_);
+    try {
+        cv::perspectiveTransform(imagePoints, worldPoints, cam2world_);
+    }  catch(cv::Exception e) {
+        ROS_INFO_STREAM("imageToWorld: " << e.what());
+    }
     return true;
   }
 
@@ -284,7 +288,11 @@ public:
       ROS_WARN_STREAM("[worldToImage] Homography not received yet");
       return false;
     }
-    cv::perspectiveTransform(worldPoints, imagePoints, world2cam_);
+    try {
+        cv::perspectiveTransform(worldPoints, imagePoints, world2cam_);
+    }  catch(cv::Exception e) {
+        ROS_INFO_STREAM("worldToImage: " << e.what());
+    }
     return true;
   }
 
@@ -301,7 +309,7 @@ public:
       return false;
     }
     dstImg = cv::Mat::zeros( srcImg.rows, srcImg.cols, srcImg.type() );
-    cv::warpPerspective(srcImg, dstImg, cam2world_, transformed_size_);
+    cv::warpPerspective(srcImg, dstImg, scaledCam2world_, transformed_size_);
     return true;
   }
 
@@ -317,7 +325,11 @@ public:
       ROS_WARN_STREAM("[cameraToWarpedImg] Homography not received yet");
       return false;
     }
-    cv::perspectiveTransform(cameraPoints, warpedImgPoints, scaledCam2world_);
+    try {
+        cv::perspectiveTransform(cameraPoints, warpedImgPoints, scaledCam2world_);
+    }  catch(cv::Exception e) {
+        ROS_INFO_STREAM("cameraToWarpedImg: " << e.what());
+    }
     return true;
   }
 
@@ -326,7 +338,11 @@ public:
         ROS_WARN_STREAM("[warpedImgToCamera] Homography not received yet");
         return false;
       }
-      cv::perspectiveTransform(warpedImgPoints, cameraPoints, scaledWorld2cam_);
+      try {
+          cv::perspectiveTransform(warpedImgPoints, cameraPoints, scaledWorld2cam_);
+      }  catch(cv::Exception e) {
+          ROS_INFO_STREAM("warpedImgToCamera: " << e.what());
+      }
       return true;
   }
 

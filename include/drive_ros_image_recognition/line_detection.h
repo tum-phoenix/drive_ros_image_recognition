@@ -74,6 +74,8 @@ private:
   nav_msgs::Odometry lastUsedOdometry;
   nav_msgs::Odometry latestOdometry;
   bool odometryInitialized = false;
+  bool firstUpdate = true;
+  ros::Time lastUpdate;
 
   cv::Mat prevPolyCoeff;
 
@@ -105,6 +107,15 @@ private:
   bool findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
   		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
   cv::Point2f findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine);
+
+  bool streetMapInit = false;
+  bool resetStreetMap = true;
+  cv::Mat binaryStreetMap;
+  Line* closestLineToPoint(std::vector<Line> &lines, const cv::Point2f point);
+  float pointToLineDistance(Line &l, const cv::Point2f &p);
+  float distanceBetweenLines(Line &a, Line &b);
+  void createBinaryStreetMap(std::vector<Line> &lines, ros::Time stamp);
+
 
 #ifdef PUBLISH_DEBUG
   void drawDebugLines(std::vector<Line> &lines);
