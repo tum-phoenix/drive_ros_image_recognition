@@ -196,6 +196,9 @@ void LineDetection::createBinaryStreetMap(std::vector<Line> &lines, ros::Time st
 	ROS_INFO("=======================================");
 	std::vector<cv::Point2f> worldPoints, imagePoints;
 
+	///////////////////////////////////////////////////////
+	// Transform street map from previous frame
+	///////////////////////////////////////////////////////
 	if(!firstUpdate && !resetStreetMap) {
 		// Transform ROI from new map to previous map
 		cv::Rect2f roiInNewMap(cv::Point2f(imgHeight_ * 0.1f, imgWidth_  * 0.1f),
@@ -265,35 +268,37 @@ void LineDetection::createBinaryStreetMap(std::vector<Line> &lines, ros::Time st
 	firstUpdate = false;
 	lastUpdate = ros::Time::now();
 
-//	cv::Mat binaryStreetMap(imgHeight_, imgWidth_, CV_8UC3, cv::Scalar());
-
+	///////////////////////////////////////////////////////
+	// Decrease probability
+	///////////////////////////////////////////////////////
 	for(int j = 0; j < binaryStreetMap.rows; j++)  {
 		for (int i = 0; i < binaryStreetMap.cols; i++) {
 			binaryStreetMap.at<uchar>(j,i) = std::max(0, binaryStreetMap.at<uchar>(j,i) - (255 / 3));
 		}
 	}
 
+	///////////////////////////////////////////////////////
+	// Find lane markings based on distance and angel to each other
+	///////////////////////////////////////////////////////
 	for(int i = 0; i < lines.size(); i++) {
 		float lineAngle = lines.at(i).getAngle();
 		for(int j = i + 1; j < lines.size(); j++) {
 			float angleDiff = fabsf(lineAngle - lines.at(j).getAngle());
-//			ROS_INFO("Angle diff = %.2f", (angleDiff * 180.f) / M_PI);
 			if(angleDiff < ((3.f / 180.f) * M_PI)) {
 				float lineDist = distanceBetweenLines(lines.at(i), lines.at(j));
-//				ROS_INFO("Distance between lines = %.3f", distanceBetweenLines(lines.at(i), lines.at(j)));
 				if(lineDist < 0.05f && lineDist > 0.02f) {
 					// TODO: maybe make sure the two lines are beside each other, not connecting to a longer line
-//					ROS_INFO("  found two matching lines");
-//					cv::Scalar color = cv::Scalar(255,255,255);
 					int color = 255.0;
 					cv::line(binaryStreetMap, lines.at(i).iP1_, lines.at(i).iP2_, color, 2);
 					cv::line(binaryStreetMap, lines.at(j).iP1_, lines.at(j).iP2_, color, 2);
-				} else {
-//					ROS_INFO("  angle ok, distance not");
 				}
 			}
 		}
 	}
+
+	///////////////////////////////////////////////////////
+	//
+	///////////////////////////////////////////////////////
 
 	cv::namedWindow("Street Map", cv::WINDOW_KEEPRATIO | cv::WINDOW_AUTOSIZE);
 	cv::imshow("Street Map", binaryStreetMap);
