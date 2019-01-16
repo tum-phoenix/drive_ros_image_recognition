@@ -56,7 +56,6 @@ private:
   ros::Subscriber homography_params_sub_;
   ros::Subscriber odometrySub;
   ros::Publisher drivingLinePub;
-  ros::Publisher drivingMarkerPub;
 #ifdef PUBLISH_DEBUG
   image_transport::Publisher debugImgPub_;
 #endif
