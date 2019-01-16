@@ -11,6 +11,7 @@
 #include "drive_ros_msgs/RoadLine.h"
 #include "drive_ros_msgs/simple_trajectory.h"
 #include "drive_ros_msgs/DrivingLine.h"
+#include <visualization_msgs/Marker.h>
 
 namespace drive_ros_image_recognition {
 
@@ -52,6 +53,8 @@ bool LineDetection::init() {
     drivingLinePub = nh_.advertise<drive_ros_msgs::DrivingLine>("driving_line_topic", 1);
     ROS_INFO("Publish driving line on topic '%s'", drivingLinePub.getTopic().c_str());
 
+    drivingMarkerPub = pnh_.advertise<visualization_msgs::Marker>("driving_line_visualization", 0);
+
 #ifdef PUBLISH_DEBUG
     debugImgPub_ = imageTransport_.advertise("debug_image", 3);
     ROS_INFO_STREAM("Publishing debug image on topic " << debugImgPub_.getTopic());
@@ -68,6 +71,25 @@ bool LineDetection::init() {
 
 void LineDetection::odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg) {
 	latestOdometry = *odomMsg;
+}
+
+void convertDrivingLaneToMarker(const DrivingLane &driving_lane, visualization_msgs::Marker &roadMarkerMsg) {
+  // setup Marker
+  roadMarkerMsg.action = visualization_msgs::Marker::ADD;
+  roadMarkerMsg.type = visualization_msgs::Marker::LINE_STRIP;
+  roadMarkerMsg.header.frame_id = "axis_rear";
+  roadMarkerMsg.scale.x = 0.1f;
+  roadMarkerMsg.color.g = 1.f;
+  roadMarkerMsg.points.clear();
+
+  // todo: parametrize starting position of the road somewhere
+  float x_start = 0.5f;
+  geometry_msgs::Point marker_point;
+  for (float i=x_start; i<driving_lane.detectionRange; i+=0.1f) {
+    marker_point.x = i;
+    marker_point.y = driving_lane.poly.atX(i);
+    roadMarkerMsg.points.push_back(marker_point);
+  }
 }
 
 ///
@@ -107,6 +129,13 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     }
 
     drivingLinePub.publish(drivingLineMsg);
+    visualization_msgs::Marker roadMarkerMsg;
+    // delete previously put markers
+    roadMarkerMsg.action = visualization_msgs::Marker::DELETEALL;
+    drivingMarkerPub.publish(roadMarkerMsg);
+
+    convertDrivingLaneToMarker(dl, roadMarkerMsg);
+    drivingMarkerPub.publish(roadMarkerMsg);
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
