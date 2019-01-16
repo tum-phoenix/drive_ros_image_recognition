@@ -27,7 +27,7 @@ LineDetection::LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
     , image_operator_()
     , dsrv_server_()
     , dsrv_cb_(boost::bind(&LineDetection::reconfigureCB, this, _1, _2))
-	, roadModel(&tfListener_)
+    , roadModel(&tfListener_, laneWidthWorld_)
 {
 }
 
@@ -116,8 +116,24 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
 
     std::vector<Line> linesInImage;
     findLinesWithHough(homographedImg, linesInImage);
-    auto drivingLine = findLaneMarkings(linesInImage);
 
+    if(drawDebugLines_) {
+        // Draw the Hough lines
+        for(auto l : linesInImage) {
+            cv::line(debugImg_, l.iP1_, l.iP2_, cv::Scalar(rand() % 255, rand() % 255, rand() % 255), 2);
+        }
+
+        // Display the given lane width
+        std::vector<cv::Point2f> worldPts, imagePts;
+        worldPts.push_back(cv::Point2f(0.5f, -.5f * laneWidthWorld_));
+        worldPts.push_back(cv::Point2f(0.5f, .5f * laneWidthWorld_));
+
+        image_operator_.worldToWarpedImg(worldPts, imagePts);
+
+        cv::line(debugImg_, imagePts.at(0), imagePts.at(1), cv::Scalar(0,0,255), 4, cv::LINE_AA);
+    }
+
+    findLaneMarkings(linesInImage);
 
     drive_ros_msgs::DrivingLine drivingLineMsg;
     auto dl = roadModel.getDrivingLine();
@@ -147,7 +163,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     //  ROS_INFO_STREAM("Cycle time: " << (std::chrono::duration<double, std::milli>(t_end-t_start).count()) << "ms");
 }
 
-std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<Line> &lines) {
+void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     cv::Point2f segStartWorld(0.3f, 0.f);
     float segAngle = 0.f;
     float totalSegLength = 0.f;
@@ -158,9 +174,32 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
     std::vector<cv::Point2f> worldPts, imgPts;
 
 //    ROS_INFO("------------- New image ------------------");
+    ///////////////////////////////////////////////////////
+    // Find lane markings based on distance and angel to each other
+    ///////////////////////////////////////////////////////
+    std::vector<int> indicesToKeep;
+
     for(int i = 0; i < lines.size(); i++) {
-    	unusedLines.push_back(&lines.at(i));
+        float lineAngle = lines.at(i).getAngle();
+        for(int j = i + 1; j < lines.size(); j++) {
+            float angleDiff = fabsf(lineAngle - lines.at(j).getAngle());
+            if(angleDiff < ((3.f / 180.f) * M_PI)) {
+                float lineDist = distanceBetweenLines(lines.at(i), lines.at(j));
+                if(lineDist < 0.05f && lineDist > 0.02f) {
+                    // TODO: maybe make sure the two lines are beside each other, not connecting to a longer line
+                    indicesToKeep.push_back(i);
+                    indicesToKeep.push_back(j);
+                }
+            }
+        }
     }
+
+    for(auto i : indicesToKeep) {
+        unusedLines.push_back(&lines.at(i));
+    }
+//    for(int i = 0; i < lines.size(); i++) {
+//    	unusedLines.push_back(&lines.at(i));
+//    }
 
     // ================================
     // Find lane in new image
@@ -201,7 +240,7 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
         // ================================
         // Search for an intersection
 		// ================================
-        float stopLineAngle;
+#if 0
         Segment intersectionSegment;
         findIntersectionExit = false;
         if(findIntersection(intersectionSegment, segAngle, segStartWorld, leftMarkings, midMarkings, rightMarkings)) {
@@ -218,17 +257,18 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
         		break;
         	}
         }
+#endif
 
         // only used unused lines for the next iteration
         unusedLines = otherMarkings;
     }
 
 //    ROS_INFO("Detection range = %.2f", totalSegLength);
-    roadModel.addSegments(foundSegments, imgTimestamp);
-
-    auto transformedLane = roadModel.getDrivingLinePts();
+    bool segmentsValid = roadModel.addSegments(foundSegments, imgTimestamp);
 
 #ifdef PUBLISH_DEBUG
+    auto transformedLane = roadModel.getDrivingLinePts();
+
     worldPts.clear();
     imgPts.clear();
 
@@ -238,9 +278,10 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
     	}
     	image_operator_.worldToWarpedImg(worldPts, imgPts);
 
+        cv::Scalar trajColor = segmentsValid ? cv::Scalar(0,255) : cv::Scalar(255);
     	for(int i = 1; i < imgPts.size(); i++) {
-    		cv::circle(debugImg_, imgPts.at(i), 5, cv::Scalar(0,0,255), 2, cv::LINE_AA);
-        	cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), cv::Scalar(0,0,255), 2, cv::LINE_AA);
+            cv::circle(debugImg_, imgPts.at(i), 5, trajColor, 2, cv::LINE_AA);
+            cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), trajColor, 2, cv::LINE_AA);
     	}
     }
 
@@ -276,8 +317,6 @@ std::vector<tf::Stamped<tf::Point>> LineDetection::findLaneMarkings(std::vector<
 //    	cv::line(debugImg_, m->iP1_, m->iP2_, cv::Scalar(0,180), 2, cv::LINE_AA);
 //    }
 #endif
-
-    return transformedLane;
 }
 
 ///
@@ -349,13 +388,13 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     for(auto linesIt = lines.begin(); linesIt != lines.end(); ++linesIt) {
         if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
             leftMarkings.push_back(*linesIt);
-//            cv::line(debugImg_, linesIt->iP1_, linesIt->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA); // Green
+            cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
         } else if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
             midMarkings.push_back(*linesIt);
-//            cv::line(debugImg_, linesIt->iP1_, linesIt->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA); // Green
+            cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
         } else if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
             rightMarkings.push_back(*linesIt);
-//            cv::line(debugImg_, linesIt->iP1_, linesIt->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA); // Green
+            cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
         } else {
         	otherMarkings.push_back(*linesIt);
         }
@@ -377,8 +416,25 @@ bool LineDetection::lineIsInRegion(Line *line, const cv::RotatedRect *region, bo
     	// we check if at least on of the lines ends is in the region
     	if(pointIsInRegion(&(line->iP1_), edges))
     		return true;
-    	else
-    		return pointIsInRegion(&(line->iP2_), edges);
+        else if(pointIsInRegion(&(line->iP2_), edges))
+            return true;
+        else {
+            // in case the line start and end are outside the rect, the line can still intersect with it
+            std::vector<cv::Point2f> pts;
+            pts.push_back(line->iP1_);
+            pts.push_back(line->iP2_);
+            auto lineRect = cv::minAreaRect(pts);
+            lineRect.size.height += 1;
+            lineRect.size.width += 1;
+//            ROS_INFO_STREAM("Points " << line->iP1_ << " and " << line->iP2_ << " give Rect at " << lineRect.center << " with size " << lineRect.size);
+            int res = cv::rotatedRectangleIntersection(lineRect, *region, pts);
+            if(res == cv::INTERSECT_NONE) {
+                return false;
+            } else {
+                return true;
+            }
+        }
+
     } else {
     	// we check if at least on of the lines ends is in the region
     	if(pointIsInRegion(&(line->wP1_), edges))
@@ -794,9 +850,10 @@ void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLin
     // Build lines from points
     std::vector<Line> lines;
     for(size_t i = 0; i < worldPoints.size(); i += 2) {
-        lines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
+        houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
     }
 
+#if 0
     // Split lines which are longer than segmentLength (world coordinates)
     worldPoints.clear();
     imagePoints.clear();
@@ -832,9 +889,33 @@ void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLin
     	houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
     }
 
-//    ROS_INFO_STREAM("Started with " << lines.size() << " lines, now having " << houghLines.size());
+#endif
+}
 
-    return;
+/*
+ * In world coordinates
+ */
+float LineDetection::pointToLineDistance(Line &l, const cv::Point2f &p) {
+    // http://paulbourke.net/geometry/pointlineplane/
+
+    if(getDistanceBetweenPoints(l.wP1_, l.wP2_) == 0) {
+        ROS_WARN("Line with length 0");
+        return std::numeric_limits<float>::max();
+    }
+
+    float u = ((p.x - l.wP1_.x)*(l.wP2_.x - l.wP1_.x) + (p.y - l.wP1_.y)*(l.wP2_.y - l.wP1_.y)) /
+            (getDistanceBetweenPoints(l.wP1_, l.wP2_));
+
+    float intersectionPointX = l.wP1_.x + u*(l.wP2_.x - l.wP1_.x);
+    float intersectionPointY = l.wP1_.y + u*(l.wP2_.y - l.wP1_.y);
+
+    return getDistanceBetweenPoints(p, cv::Point2f(intersectionPointX, intersectionPointY));
+}
+
+float LineDetection::distanceBetweenLines(Line &a, Line &b) {
+    return	fminf(pointToLineDistance(a, b.wP1_),
+                  fminf(pointToLineDistance(a, b.wP2_),
+                        fminf(pointToLineDistance(b, a.wP1_), pointToLineDistance(b, a.wP2_))));
 }
 
 ///
@@ -843,11 +924,12 @@ void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLin
 /// \param config
 /// \param level
 ///
-void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level){
+void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level) {
     image_operator_.setConfig(config);
-    laneWidthWorld_ = config.lineWidth;
+    drawDebugLines_ = config.draw_debug;
+    laneWidthWorld_ = config.lane_width;
+    lineVar_ = config.lane_var;
     lineAngle_ = config.lineAngle;
-    lineVar_ = config.lineVar;
     maxSenseRange_ = config.maxSenseRange;
     cannyThreshold_ = config.cannyThreshold;
     houghThresold_ = config.houghThreshold;
@@ -857,6 +939,8 @@ void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
     maxRansacInterations_ = config.ransacIterations;
     trajectoryDist = config.trajectory_dist;
     targetVelocity = config.target_velocity;
+
+    roadModel.setLaneWidth(laneWidthWorld_);
 }
 
 } // namespace drive_ros_image_recognition

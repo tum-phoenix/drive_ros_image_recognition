@@ -66,10 +66,17 @@ void transformRearAxisPointsToOdom(
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 void RoadModel::getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const {
-	if(noNewSegmentsCtr < 6) {
-		posWorld.x = 0.4f;
-		posWorld.y = dl.poly.atX(posWorld.x);
-		angle = dl.poly.getFstDeviationAtX(posWorld.x);
+    float firstTrajPointAt = 0.4f;
+    float firstY = dl.poly.atX(firstTrajPointAt);
+
+    // If we are on the left lane, the trajectory could be laneWidth [m] on our right side
+    bool firstPtOnStreet = (firstY > (-1.2f * laneWidth)) & (firstY < 0.2f * laneWidth);
+    bool angleOk = fabsf(dl.poly.getFstDeviationAtX(firstTrajPointAt)) < M_PI_4;
+
+    if(firstPtOnStreet && angleOk && (noNewSegmentsCtr < 6)) {
+        posWorld.x = firstTrajPointAt;
+        posWorld.y = firstY;
+        angle = dl.poly.getFstDeviationAtX(firstTrajPointAt);
 
 		ROS_INFO("Start search angle is %.1f[deg]", angle * 180.f / M_PI);
 
@@ -79,6 +86,8 @@ void RoadModel::getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const
 		posWorld.x = 0.3f;
 		posWorld.y = 0.f;
 		angle = 0.f;
+
+        ROS_INFO("FirstPointOk? %s AngleOk? %s", (firstPtOnStreet ? "Yes" : "No"), (angleOk ? "Yes" : "No"));
 	}
 }
 
@@ -104,10 +113,11 @@ bool RoadModel::segmentFitsToPrevious(Segment *previousSegment, Segment *segment
 	return true;
 }
 
-void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timestamp) {
+bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timestamp) {
 	if(newSegments.empty()) {
 		ROS_INFO("!!! No new segments");
 		noNewSegmentsCtr++;
+        return false;
 	} else {
 		noNewSegmentsCtr = 0;
 
@@ -134,7 +144,7 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 				)->x;
 
 		if(newDetectionRange < 0.8f) {
-			return;
+            return false;
 		}
 
 		// 2) Compare the current driving line polynom with the one
@@ -160,6 +170,7 @@ void RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 		// TODO: maybe take history over polys and weight them based on age
 
 		dl = DrivingLane(newPoly, newDetectionRange, timestamp);
+        return true;
 	}
 }
 

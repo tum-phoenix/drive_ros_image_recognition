@@ -26,6 +26,7 @@ private:
   ros::NodeHandle pnh_;
 
   // configs
+  bool drawDebugLines_;
   float laneWidthWorld_;
   float lineAngle_; // not used at the moment
   float lineVar_;
@@ -86,7 +87,7 @@ private:
 
   // methods
   void findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLines);
-  std::vector<tf::Stamped<tf::Point>> findLaneMarkings(std::vector<Line> &lines);
+  void findLaneMarkings(std::vector<Line> &lines);
 
   // helper functions
   float getDistanceBetweenPoints(const cv::Point2f a, const cv::Point2f b) {
@@ -104,6 +105,9 @@ private:
   Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle);
   bool findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
   		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
+
+  float distanceBetweenLines(Line &a, Line &b);
+  float pointToLineDistance(Line &l, const cv::Point2f &p);
 
 #ifdef PUBLISH_DEBUG
   void drawDebugLines(std::vector<Line> &lines);

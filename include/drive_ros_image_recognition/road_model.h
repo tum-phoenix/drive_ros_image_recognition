@@ -85,17 +85,21 @@ class RoadModel {
 	tf::TransformListener *pTfListener;
 	DrivingLane dl;
 	int noNewSegmentsCtr = 0; // DEBUG
+    float laneWidth;
 
 public:
-    RoadModel(tf::TransformListener *tfListener)
+    RoadModel(tf::TransformListener *tfListener, float laneWidth_)
 		: pTfListener(tfListener)
+        , laneWidth(laneWidth_)
 	{
 	}
 
     DrivingLane getDrivingLine() { return dl; }
 
+    inline void setLaneWidth(float w) { laneWidth = w; }
+
     // Segment based
-    void addSegments(std::vector<Segment> &newSegments, ros::Time timestamp);
+    bool addSegments(std::vector<Segment> &newSegments, ros::Time timestamp);
     void getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const;
 
     // TODO: is this check necessary here? or already done in line_detection?
