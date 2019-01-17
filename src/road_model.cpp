@@ -78,7 +78,7 @@ void RoadModel::getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const
         posWorld.y = firstY;
         angle = dl.poly.getFstDeviationAtX(firstTrajPointAt);
 
-		ROS_INFO("Start search angle is %.1f[deg]", angle * 180.f / M_PI);
+//		ROS_INFO("Start search angle is %.1f[deg]", angle * 180.f / M_PI);
 
 		// TODO: what do to if there is an intersection very close? -> is this handled by BT?
 	} else {
@@ -87,7 +87,7 @@ void RoadModel::getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const
 		posWorld.y = 0.f;
 		angle = 0.f;
 
-        ROS_INFO("FirstPointOk? %s AngleOk? %s", (firstPtOnStreet ? "Yes" : "No"), (angleOk ? "Yes" : "No"));
+//        ROS_INFO("FirstPointOk? %s AngleOk? %s", (firstPtOnStreet ? "Yes" : "No"), (angleOk ? "Yes" : "No"));
 	}
 }
 
@@ -105,7 +105,7 @@ bool RoadModel::segmentFitsToPrevious(Segment *previousSegment, Segment *segment
 	} else {
 		// The first segment should points into the cars driving direction
 		if(std::abs(segmentToAdd->angleTotal) > M_PI / 4.0f) {
-			ROS_WARN("First segments angle is too big: %.1f[deg]", segmentToAdd->angleTotal * 180.f / M_PI);
+//			ROS_WARN("First segments angle is too big: %.1f[deg]", segmentToAdd->angleTotal * 180.f / M_PI);
 			return false;
 		}
 	}
@@ -115,7 +115,7 @@ bool RoadModel::segmentFitsToPrevious(Segment *previousSegment, Segment *segment
 
 bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timestamp) {
 	if(newSegments.empty()) {
-		ROS_INFO("!!! No new segments");
+//		ROS_INFO("!!! No new segments");
 		noNewSegmentsCtr++;
         return false;
 	} else {
@@ -133,7 +133,7 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 			}
 		}
 
-		Polynom newPoly(3, ptsForPoly);
+		Polynom newPoly(polyOrder, ptsForPoly);
 
 		// TODO: could probably be done in for loop over segments above
 		float newDetectionRange =
@@ -162,10 +162,10 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 			error += std::sqrt(diff*diff);
 		}
 
-		ROS_INFO("---");
-		ROS_INFO("Old range = %.1f", dl.detectionRange);
-		ROS_INFO("New range = %.1f", newDetectionRange);
-		ROS_INFO("Poly diff = %.2f", error);
+//		ROS_INFO("---");
+//		ROS_INFO("Old range = %.1f", dl.detectionRange);
+//		ROS_INFO("New range = %.1f", newDetectionRange);
+//		ROS_INFO("Poly diff = %.2f", error);
 
 		// TODO: maybe take history over polys and weight them based on age
 
