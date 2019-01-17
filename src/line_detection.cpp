@@ -209,10 +209,10 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         segStartWorld.x = seg.positionWorld.x + cos(seg.angleTotal) * seg.length;
         segStartWorld.y = seg.positionWorld.y + sin(seg.angleTotal) * seg.length;
 
+#if 0
         // ================================
         // Search for an intersection
 		// ================================
-#if 0
         Segment intersectionSegment;
         findIntersectionExit = false;
         if(findIntersection(intersectionSegment, segAngle, segStartWorld, leftMarkings, midMarkings, rightMarkings)) {
@@ -367,19 +367,70 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
 void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, std::vector<Line*> &lines,
                                          std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
 										 std::vector<Line*> &rightMarkings, std::vector<Line*> &otherMarkings) {
+
+	float orientationAngle = (regions->at(0).angle / 180.f) * M_PI; // the regions angles in [rad]
+	if(orientationAngle > M_PI)
+		ROS_WARN("Orientation angle > PI");
+
     for(auto linesIt = lines.begin(); linesIt != lines.end(); ++linesIt) {
-        if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
-            leftMarkings.push_back(*linesIt);
-            cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-        } else if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
-            midMarkings.push_back(*linesIt);
-            cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
-        } else if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
-            rightMarkings.push_back(*linesIt);
-            cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-        } else {
-        	otherMarkings.push_back(*linesIt);
-        }
+    	// first check if the angle is ok to ignore stop and start lines
+    	if(fabsf(orientationAngle - (*linesIt)->getAngle()) > M_PI_2) {
+    		otherMarkings.push_back(*linesIt);
+    	} else {
+    		// if angle is ok, test with regions
+    		if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
+    			leftMarkings.push_back(*linesIt);
+    			cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+    		} else if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
+    			midMarkings.push_back(*linesIt);
+    			cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 255), 2, cv::LINE_AA);
+    		} else if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
+    			rightMarkings.push_back(*linesIt);
+    			cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+    		} else {
+    			otherMarkings.push_back(*linesIt);
+    		}
+    	}
+    }
+
+    ROS_INFO("---");
+    std::vector<cv::Point2f> linePointsWorld;
+    for(auto l : leftMarkings) {
+    	linePointsWorld.push_back(l->wP1_);
+    	linePointsWorld.push_back(l->wP2_);
+    }
+    if(!linePointsWorld.empty()) {
+    	auto rotatedRect = cv::minAreaRect(linePointsWorld);
+    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
+    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+    		leftMarkings.clear();
+    	}
+    }
+
+    linePointsWorld.clear();
+    for(auto l : midMarkings) {
+    	linePointsWorld.push_back(l->wP1_);
+    	linePointsWorld.push_back(l->wP2_);
+    }
+    // TODO: if there is a double line, it could be bigger. test if we need a higher limit here
+    if(!linePointsWorld.empty()) {
+    	auto rotatedRect = cv::minAreaRect(linePointsWorld);
+    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
+    		ROS_INFO("Mid markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+    	}
+    }
+
+    linePointsWorld.clear();
+    for(auto l : rightMarkings) {
+    	linePointsWorld.push_back(l->wP1_);
+    	linePointsWorld.push_back(l->wP2_);
+    }
+    if(!linePointsWorld.empty()) {
+    	auto rotatedRect = cv::minAreaRect(linePointsWorld);
+    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
+    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+    		rightMarkings.clear();
+    	}
     }
 }
 
