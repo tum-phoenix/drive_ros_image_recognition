@@ -148,29 +148,76 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     ///////////////////////////////////////////////////////
     // Find lane markings based on distance and angel to each other
     ///////////////////////////////////////////////////////
-    std::vector<int> indicesToKeep;
 
     for(int i = 0; i < lines.size(); i++) {
         float lineAngle = lines.at(i).getAngle();
         for(int j = i + 1; j < lines.size(); j++) {
             float angleDiff = fabsf(lineAngle - lines.at(j).getAngle());
-            if(angleDiff < ((3.f / 180.f) * M_PI)) {
+            if(angleDiff < ((3.f / 180.f) * M_PI)) { // TODO: in config
                 float lineDist = distanceBetweenLines(lines.at(i), lines.at(j));
-                if(lineDist < 0.05f && lineDist > 0.02f) {
+                if(lineDist < 0.05f && lineDist > 0.02f) { // TODO: in config
                     // TODO: maybe make sure the two lines are beside each other, not connecting to a longer line
-                    indicesToKeep.push_back(i);
-                    indicesToKeep.push_back(j);
+                	// TODO: maybe only use every index once -> if j is used, do not use it again later
+
+                	std::vector<cv::Point2f> tmp;
+                	tmp.push_back(lines.at(i).wP1_);
+                	tmp.push_back(lines.at(i).wP2_);
+                	tmp.push_back(lines.at(j).wP1_);
+                	tmp.push_back(lines.at(j).wP2_);
+
+                	auto rect = cv::minAreaRect(tmp);
+                	float rectAngle = rect.angle;
+                	cv::Size2f rectSize = rect.size;
+
+                	if (rect.angle < -45.) {
+                		rectAngle += 90.0;
+                		cv::swap(rectSize.width, rectSize.height);
+                	}
+
+#if 0
+                	// Draw boxes for debugging
+                	cv::Point2f edges[4];
+                	rect.points(edges);
+
+                	std::vector<cv::Point2f> tmpW, tmpI;
+                	for(int i = 0; i < 4; i++)
+                		tmpW.push_back(edges[i]);
+
+                	image_operator_.worldToWarpedImg(tmpW, tmpI);
+
+                	for(int i = 0; i < 4; i++)
+                		cv::line(debugImg_, tmpI.at(i), tmpI.at((i+1)%4), cv::Scalar(255));
+#endif
+
+                	float alpha = (rectAngle / 180.f) * M_PI;
+                	cv::Vec2f v(cos(alpha) * rectSize.width,
+                			    sin(alpha) * rectSize.width);
+                	v = v * .5f;
+
+                	cv::Point2f w1 = rect.center;
+                	cv::Point2f w2 = rect.center;
+
+                	w1.x -= v(0);
+                	w1.y -= v(1);
+                	w2.x += v(0);
+					w2.y += v(1);
+
+                	worldPts.push_back(w1);
+                	worldPts.push_back(w2);
+
                 }
             }
         }
     }
 
-    for(auto i : indicesToKeep) {
-        unusedLines.push_back(&lines.at(i));
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+
+    for(int i = 0; i < worldPts.size(); i += 2) {
+    	unusedLines.push_back(new Line(imgPts.at(i), imgPts.at(i+1), worldPts.at(i), worldPts.at(i+1)));
     }
-//    for(int i = 0; i < lines.size(); i++) {
-//    	unusedLines.push_back(&lines.at(i));
-//    }
+
+    worldPts.clear();
+    imgPts.clear();
 
     // ================================
     // Find lane in new image
@@ -289,6 +336,10 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 //    	cv::line(debugImg_, m->iP1_, m->iP2_, cv::Scalar(0,180), 2, cv::LINE_AA);
 //    }
 #endif
+
+    for(auto l : unusedLines) {
+    	delete l;
+    }
 }
 
 ///
@@ -519,8 +570,8 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     worldPts.push_back(segStartWorld);
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
-    if(numLines < 5) {
-//        ROS_WARN("No lines for Ransac");
+    if(numLines == 0) {
+        ROS_WARN("No lines for Ransac");
         return Segment(segStartWorld, imgPts.at(0), 0.f, prevAngle, segmentLength_, 0.f);
     }
 
