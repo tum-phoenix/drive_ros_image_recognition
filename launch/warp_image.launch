@@ -30,7 +30,7 @@
         <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="warp_image_nodelet_manager"/>
         <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
 
-        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="warp_image_nodelet_manager"  args="manager" output="$(arg output)"/>
+        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="$(arg manager_used)"  args="manager" output="$(arg output)"/>
         <node pkg="nodelet" type="nodelet" name="warp_image_nodelet" args="load drive_ros_image_recognition/WarpImageNodelet $(arg manager_used)" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
             <remap from="img_in" to="$(arg camera_image_topic)"/>
             <remap from="warped_out" to="$(arg warped_image_topic)"/>
