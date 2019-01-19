@@ -931,6 +931,10 @@ void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLin
         }
     }
 
+    if (imagePoints.size() == 0) {
+        ROS_WARN_STREAM("No hough lines found in image");
+        return;
+    }
     image_operator_.warpedImgToWorld(imagePoints, worldPoints);
 
     // Build lines from points
