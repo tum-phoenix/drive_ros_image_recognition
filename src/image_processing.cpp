@@ -117,13 +117,30 @@ bool ImageProcessing::detectLaneLines(cv::Mat image, cv::Vec4i& l1, cv::Vec4i& l
 
     std::cout << "Neg slope mean " << meanNegSlope << " variance " << varNegSlope << std::endl;
     std::cout << "Pos slope mean " << meanPosSlope << " variance " << varPosSlope << std::endl;
-    cv::imshow("Hough", hough);
+    //cv::imshow("Hough", hough);
 
     return rc;
 }
 
-void ImageProcessing::extractRelevantRegion(cv::Mat img_in, cv::Mat img_out, const cv::Vec4i l1, const cv::Vec4i l2){
+void ImageProcessing::extractRelevantRegion(cv::Mat img_in, cv::Mat& img_out, const cv::Vec4i l1, const cv::Vec4i l2){
+    img_out = cv::Mat(img_in.rows, img_in.cols, CV_8U, cv::Scalar::all(255));
+    float m1 = (l1[3] - l1[1])*1.0 / (l1[2] - l1[0]);
+    float m2 = (l2[3] - l2[1])*1.0 / (l2[2] - l2[0]);
 
+    float b1 = l1[1] - m1*l1[0];
+    float b2 = l2[1] - m2*l2[0];
+
+    for (int y = 0; y < img_in.rows; y++){
+        for (int x = 0; x < img_in.cols; x++){
+            float y_l1 = x*m1 + b1;
+            float y_l2 = x*m2 + b2;
+            if (y < y_l1 || y < y_l2 || y > 0.75*img_in.rows){
+                img_out.at<uchar>(y,x) = 0;
+            }
+        }
+    }
+
+    //imshow("Mask", img_out);
 }
 
 void ImageProcessing::imageCallback(const sensor_msgs::ImageConstPtr &msg)
@@ -146,8 +163,19 @@ void ImageProcessing::imageCallback(const sensor_msgs::ImageConstPtr &msg)
     cv::Mat img_in = cv_ptr->image;
     cv::Vec4i l1, l2;
     if (detectLaneLines(img_in, l1, l2)){
+        cv::Mat relevRegion;
+        extractRelevantRegion(img_in, relevRegion, l1, l2);
+
+        int maxCorners = 50;
+        std::vector<cv::Point2f> corners;
+        cv::goodFeaturesToTrack(img_in, corners, maxCorners, 0.01, 10, relevRegion, 3);
+
         cv::Mat img_out;
-        extractRelevantRegion(img_in, img_out, l1, l2);
+        cv::cvtColor(img_in, img_out, CV_GRAY2BGR);
+        for (unsigned int i = 0; i < corners.size(); i++){
+            cv::circle(img_out, corners[i], 2, cv::Scalar(255, 0, 0), -1);
+        }
+        cv::imshow("Output image", img_out);
     }
     cv::namedWindow("Incoming image", CV_WINDOW_NORMAL);
     cv::imshow("Incoming image", img_in);
