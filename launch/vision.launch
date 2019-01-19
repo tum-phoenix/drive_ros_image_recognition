@@ -1,5 +1,5 @@
 <launch>
-    <arg name="camera" default="camera">
+    <arg name="camera" default="camera"/>
     <arg name="camera_image_topic" default="/$(arg camera)/image_raw"/>
     <arg name="camera_info_topic" default="/$(arg camera)/camera_info"/>
     <arg name="warped_image_topic" default="/$(arg camera)/warped_image"/>
