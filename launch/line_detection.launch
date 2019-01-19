@@ -3,6 +3,7 @@
     <arg name="camera_info" default="/camera/camera_info"/>
     <arg name="homography_topic" default="/camera/camera_homography"/>
     <arg name="odometry_topic" default="/visual_odom/odom"/>
+    <arg name="driving_line_topic" default="/driving_line"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
@@ -19,18 +20,23 @@
             <remap from="camera_info" to="$(arg camera_info)"/>
             <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
-            <remap from="driving_line_topic" to="/driving_line"/>
+            <remap from="driving_line_topic" to="$(arg driving_line_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>
 
     <group if="$(arg use_nodelet)">
-        <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="street_crossing_nodelet_manager"/>
+        <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="road_detection_nodelet_manager"/>
         <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
 
-        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="street_crossing_nodelet_manager"  args="manager" output="$(arg output)"/>
-        <node pkg="nodelet" type="nodelet" name="street_crossing_detection_nodelet" args="load drive_ros_image_recognition/StreetCrossingDetectionNodelet $(arg manager_used)" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
-            <remap from="~/img_in" to="$(arg incoming_image)"/>
+        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="$(arg manager_used)"  args="manager" output="$(arg output)"/>
+        <node pkg="nodelet" type="nodelet" name="street_crossing_detection_nodelet" args="load drive_ros_image_recognition/RoadDetectionNodelet $(arg manager_used)" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
+            <remap from="img_in" to="$(arg incoming_image)"/>
+            <remap from="camera_info" to="$(arg camera_info)"/>
+            <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
+            <remap from="homography_in" to="$(arg homography_topic)"/>
+            <remap from="driving_line_topic" to="$(arg driving_line_topic)"/>
+            <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>
 
