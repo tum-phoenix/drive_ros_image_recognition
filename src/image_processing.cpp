@@ -143,7 +143,7 @@ void ImageProcessing::extractRelevantRegion(cv::Mat img_in, cv::Mat& mask, cv::M
         }
     }
 
-    imshow("Mask", mask);
+    //cv::imshow("Mask", mask);
 }
 
 bool ImageProcessing::findStartLineRANSAC(std::vector<cv::Point2f> corners, cv::Vec4i l1, cv::Vec4i l2,
@@ -242,30 +242,54 @@ bool ImageProcessing::detectStartLine(cv::Mat img_out, std::vector<cv::Point2f> 
 
     bool white = false;
     bool black = false;
-    int numSwitch = 0;
+    int numSwitch = 0, w = 0, b = 0;
 
     int start = std::min(x_intercept_line1, x_intercept_line2);
     int end = std::max(x_intercept_line1, x_intercept_line2);
 
-    for (int x = start; x <= end; x++){
+    float meanGapsBlack = 0, meanGapsWhite = 0, currGap = 0;
+
+    for (int x = start; x <= end; x+=2){
         float y = m_line*x + b_line;
         if (img_out.at<uchar>(y,x) < 100){
             if (white){
-                numSwitch++;
+                numSwitch = numSwitch + 1;
+
+                meanGapsWhite += currGap;
+                currGap = 0;
                 white = false;
             }
+
             black = true;
+            b++;
         }
 
-        if (img_out.at<uchar>(y,x) > 200){
+        if (img_out.at<uchar>(y,x) >= 200){
             if (black){
-                numSwitch++;
+                numSwitch = numSwitch + 1;
+
+                meanGapsBlack += currGap;
+                currGap = 0;
                 black = false;
             }
+
             white = true;
+            w++;
         }
+
+        currGap++;
     }
-    //std::cout << "Number of switches: " << numSwitch << std::endl;
+
+    if (w > 0){
+        meanGapsWhite /= w;
+    }
+
+    if (b > 0){
+        meanGapsBlack /= b;
+    }
+
+//    std::cout << "Number of switches: " << numSwitch << " meangapsBlack: " << meanGapsBlack << " ..." <<
+//                                                        " meangapsWhite: " << meanGapsWhite << " ..." <<std::endl;
 
 //    cv::Mat copy;
 //    cv::cvtColor(img_out, copy, CV_GRAY2BGR);
@@ -275,7 +299,7 @@ bool ImageProcessing::detectStartLine(cv::Mat img_out, std::vector<cv::Point2f> 
 
 //    cv::imshow("Line", copy);
 
-    return numSwitch >= 5;
+    return numSwitch >= 10;
     //return true;
 }
 
