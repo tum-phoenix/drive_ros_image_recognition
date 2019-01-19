@@ -444,7 +444,7 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     	}
     }
 
-    ROS_INFO("---");
+//    ROS_INFO("---");
     std::vector<cv::Point2f> linePointsWorld;
     for(auto l : leftMarkings) {
     	linePointsWorld.push_back(l->wP1_);
@@ -453,7 +453,7 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     if(!linePointsWorld.empty()) {
     	auto rotatedRect = cv::minAreaRect(linePointsWorld);
     	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+//    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
     		leftMarkings.clear();
     	}
     }
@@ -466,9 +466,9 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     // TODO: if there is a double line, it could be bigger. test if we need a higher limit here
     if(!linePointsWorld.empty()) {
     	auto rotatedRect = cv::minAreaRect(linePointsWorld);
-    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-    		ROS_INFO("Mid markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
-    	}
+//    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
+//    		ROS_INFO("Mid markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+//    	}
     }
 
     linePointsWorld.clear();
@@ -479,7 +479,7 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     if(!linePointsWorld.empty()) {
     	auto rotatedRect = cv::minAreaRect(linePointsWorld);
     	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+//    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
     		rightMarkings.clear();
     	}
     }
@@ -571,7 +571,7 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
     if(numLines == 0) {
-        ROS_WARN("No lines for Ransac");
+//        ROS_WARN("No lines for Ransac");
         return Segment(segStartWorld, imgPts.at(0), 0.f, prevAngle, segmentLength_, 0.f);
     }
 

@@ -117,9 +117,62 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 	if(newSegments.empty()) {
 //		ROS_INFO("!!! No new segments");
 		noNewSegmentsCtr++;
+		segmentsToDl.clear(); // TODO: should we really do this here?
         return false;
 	} else {
 		noNewSegmentsCtr = 0;
+
+		// 0) compare angle of previous first segment and new first segment
+		if(!segmentsToDl.empty()) {
+			if(fabsf(newSegments.at(0).angleTotal - segmentsToDl.at(0).angleTotal) > M_PI_4) {
+				ROS_INFO("Diff between first segment angles is too big");
+				return false;
+			}
+
+			// Compare positions of lane markings
+			float leftOff = newSegments.at(0).leftPosW.y - segmentsToDl.at(0).leftPosW.y;
+			float midOff = newSegments.at(0).midPosW.y - segmentsToDl.at(0).midPosW.y;
+			float rightOff = newSegments.at(0).rightPosW.y - segmentsToDl.at(0).rightPosW.y;
+
+			bool leftIsOff = fabsf(leftOff) > (laneWidth * .8f);
+			bool midIsOff = fabsf(midOff) > (laneWidth * .8f);
+			bool rightIsOff = fabsf(rightOff) > (laneWidth * .8f);
+
+			if(leftIsOff) {
+				ROS_INFO("Left line is off by %.2f", leftOff);
+			}
+
+			if(midIsOff) {
+				ROS_INFO("Mid line is off by %.2f", midOff);
+			}
+
+			if(rightIsOff) {
+				ROS_INFO("Right line is off by %.2f", rightOff);
+			}
+
+			// TODO: if lines are off, check if mid is close to oldLeft or oldRight
+			if(leftIsOff && midIsOff && rightIsOff) {
+				if(		((leftOff < 0.f) && (midOff < 0.f) && (rightOff < 0.f)) ||
+						((leftOff > 0.f) && (midOff > 0.f) && (rightOff > 0.f))) {
+					// we can assume that all lines are more than (laneWidth * .8 off)
+					// shift all lines to positive y
+					float shiftY = (leftOff + midOff + rightOff) / -3.f;
+
+					for(int i = 0; i < newSegments.size(); i++) {
+						// TODO: world and image coordinates are not matching anymore!! check if we need these later or its ok
+						newSegments.at(i).leftPosW.y += shiftY;
+						newSegments.at(i).midPosW.y += shiftY;
+						newSegments.at(i).rightPosW.y += shiftY;
+						newSegments.at(i).positionWorld.y += shiftY;
+					}
+
+				} else {
+					ROS_WARN("Weird line offset");
+				}
+			}
+
+		}
+
 
 		// 1) Build polynom from new segments
 		std::vector<cv::Point2f> ptsWorldForPoly;
@@ -172,6 +225,7 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 		// TODO: maybe take history over polys and weight them based on age
 
 		dl = DrivingLane(newPoly, newDetectionRangeWorld, timestamp);
+		segmentsToDl = newSegments;
         return true;
 	}
 }

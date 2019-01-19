@@ -84,6 +84,7 @@ struct DrivingLane {
 class RoadModel {
 	tf::TransformListener *pTfListener;
 	DrivingLane dl;
+	std::vector<Segment> segmentsToDl;
 	int polyOrder = 2;
 	int noNewSegmentsCtr = 0; // DEBUG
     float laneWidth;
