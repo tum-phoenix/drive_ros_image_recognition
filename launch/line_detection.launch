@@ -40,9 +40,9 @@
         </node>
     </group>
 
-    <include file="$(find drive_ros_ximea_importer)/launch/homography_publisher.launch">
+    <!-- include file="$(find drive_ros_ximea_importer)/launch/homography_publisher.launch">
         <arg name="homography_topic" value="$(arg homography_topic)"/>
-    </include>
+    </include -->
 
 	<!-- TODO: this launch file and the odometry should be starten from upper level launch file to set odom topic -->    
     <!-- include file="$(find drive_ros_localize_visual_odometry)/launch/simple_visual_odometry.launch" -->
