@@ -24,7 +24,7 @@ public:
 
 	}
 
-	Polynom(int polyOrder, std::vector<cv::Point2f> points)
+	Polynom(int polyOrder, std::vector<cv::Point2f> &points)
 	: order(polyOrder)
 	{
 		cv::Mat srcX(points.size(), 1, CV_32FC1);

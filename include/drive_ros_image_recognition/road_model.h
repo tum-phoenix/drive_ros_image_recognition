@@ -34,7 +34,7 @@ struct Segment {
     cv::Point2f leftPosI, midPosI, rightPosI;
     float angleDiff; // The angle difference to the previous segment
     float angleTotal; // The angle in which the lane is heading to
-    float length; // This is defined globally and hence will be the same for every segment
+    float length; // Length of the segment in world coordinates [m]
     float probablity; // The probability of this segment
     SegmentType segmentType = SegmentType::NORMAL_ROAD;
 
@@ -85,9 +85,10 @@ class RoadModel {
 	tf::TransformListener *pTfListener;
 	DrivingLane dl;
 	std::vector<Segment> segmentsToDl;
-	int polyOrder = 2;
+	int defaultPolyOrder = 2;
 	int noNewSegmentsCtr = 0; // DEBUG
     float laneWidth;
+    bool driveStraight = false;
 
 public:
     RoadModel(tf::TransformListener *tfListener, float laneWidth_)

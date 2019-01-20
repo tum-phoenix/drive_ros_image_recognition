@@ -129,6 +129,12 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 				return false;
 			}
 
+			if(fabs(newSegments.at(0).positionWorld.y - segmentsToDl.at(0).positionWorld.y) > .6f*laneWidth) {
+				ROS_WARN("Start position off");
+				return false;
+			}
+
+#if 0
 			// Compare positions of lane markings
 			float leftOff = newSegments.at(0).leftPosW.y - segmentsToDl.at(0).leftPosW.y;
 			float midOff = newSegments.at(0).midPosW.y - segmentsToDl.at(0).midPosW.y;
@@ -170,6 +176,7 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 					ROS_WARN("Weird line offset");
 				}
 			}
+#endif
 
 		}
 
@@ -179,6 +186,14 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 
 		for(auto s : newSegments) {
 			ptsWorldForPoly.push_back(s.positionWorld);
+			ROS_INFO("(%.2f, %.2f)", s.positionWorld.x, s.positionWorld.y);
+
+			cv::Point2f segmentMidPtWorld = s.positionWorld;
+			segmentMidPtWorld.x += (s.length * 0.5 * cos(s.angleTotal));
+			segmentMidPtWorld.y += (s.length * 0.5 * sin(s.angleTotal));
+
+			ROS_INFO("o(%.2f, %.2f)", segmentMidPtWorld.x, segmentMidPtWorld.y);
+			ptsWorldForPoly.push_back(segmentMidPtWorld);
 
 			// TODO: can probably be removed because we do not find intersections
 			if(s.isIntersection()) {
@@ -187,20 +202,30 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 			}
 		}
 
+		ROS_INFO("+++ ptsWorldForPoly.size() = %lu", ptsWorldForPoly.size());
+
+		// if we have only two points, we want a polynom of order 1
+		int polyOrder = (ptsWorldForPoly.size() > 2) ? defaultPolyOrder : 1;
 		Polynom newPoly(polyOrder, ptsWorldForPoly);
 
 		// determine detection range
-		float newDetectionRangeWorld =
+		auto maxElem =
 				std::max_element(
 						ptsWorldForPoly.begin(),
 						ptsWorldForPoly.end(),
 						[](cv::Point2f &fst, cv::Point2f &scd) { return fst.x < scd.x; }
-				)->x;
+				);
 
-		if(newDetectionRangeWorld < 0.8f) {
+//		float newDetectionRangeWorld = maxElem->x;
+
+		float newDetectionRangeWorld = newSegments.back().positionWorld.x + newSegments.back().length;
+
+		if(newDetectionRangeWorld < 0.5f) {
 			ROS_INFO("Detection range too short");
+			driveStraight = true;
             return false;
 		}
+		driveStraight = false;
 
 		// 2) Compare the current driving line polynom with the old one
 		// TODO: the old polynom is not perfectly correct since we ignore the cars movement
@@ -220,7 +245,15 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 //		ROS_INFO("---");
 //		ROS_INFO("Old range = %.1f", dl.detectionRange);
 //		ROS_INFO("New range = %.1f", newDetectionRange);
-//		ROS_INFO("Poly diff = %.2f", error);
+		ROS_INFO("Poly diff = %.2f", error);
+
+		float fstDev = newPoly.getFstDeviationAtX(newSegments.at(0).positionWorld.x);
+		if(fabsf(atan(fstDev) - newSegments.at(0).angleTotal) > M_PI_2) {
+			ROS_WARN("Polynom' does not match angle of first segment");
+			ROS_INFO("fstDev = %.2f, angle of first segment = %.2f", atan(fstDev), newSegments.at(0).angleTotal);
+			// TODO: what to do here?
+			return false;
+		}
 
 		// TODO: maybe take history over polys and weight them based on age
 
