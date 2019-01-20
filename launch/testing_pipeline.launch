@@ -1,0 +1,30 @@
+<launch>
+    <arg name="bag_file" default="/home/phoenix/Downloads/drive_2017-11-18-14-50-05_bosch_big_track_2.bag"/>
+    <arg name="bag_image_topic" default="/camera/image_raw"/>
+    <arg name="warped_image_topic" default="/warped_image"/>
+    <arg name="use_nodelet" default="false"/>
+    <arg name="nodelet_manager" default=""/>
+    <arg name="run_python" default="false"/>
+
+    <node pkg="rosbag" type="play" name="player" output="screen" args="--clock $(arg bag_file)"/>
+
+    <arg if="$(eval arg('nodelet_manager') == '')" name="manager_used" value="testing_pipeline_nodelet_manager"/>
+    <arg unless="$(eval arg('nodelet_manager') == '')" name="manager_used" value="$(arg nodelet_manager)"/>
+    <group if="$(arg use_nodelet)">
+        <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="$(arg manager_used)"  args="manager" output="screen"/>
+    </group>
+
+    <include file="$(find drive_ros_image_recognition)/launch/warp_image.launch">
+        <arg name="camera_image_topic" value="$(arg bag_image_topic)"/>
+        <arg name="warped_image_topic" value="$(arg warped_image_topic)"/>
+        <arg name="use_nodelet" value="$(arg use_nodelet)"/>
+        <arg name="nodelet_manager" value="$(arg manager_used)"/>
+    </include>
+
+    <include file="$(find drive_ros_image_recognition)/launch/image_processing.launch">
+        <arg name="img_in" value="$(arg warped_image_topic)"/>
+        <arg name="use_nodelet" value="$(arg use_nodelet)"/>
+        <arg name="nodelet_manager" value="$(arg manager_used)"/>
+        <arg name="run_python" value="$(arg run_python)"/>
+    </include>
+</launch>

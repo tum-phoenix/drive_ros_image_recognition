@@ -1,0 +1,18 @@
+<!-- Image Processing Nodelet -->
+<library path="lib/libimage_processing_nodelet">
+  <class name="drive_ros_image_recognition/ImageProcessingNodelet" type="drive_ros_image_recognition::ImageProcessingNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  Image processing nodelet.
+  </description>
+  </class>
+</library>
+
+<!-- Image Warp Nodelet -->
+<library path="lib/libwarp_image_nodelet">
+  <class name="drive_ros_image_recognition/WarpImageNodelet" type="drive_ros_image_recognition::WarpImageNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  Image warp nodelet.
+  </description>
+  </class>
+</library>
+
