@@ -77,7 +77,6 @@ void LineDetection::odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg) 
 /// \param imgIn the incoming camera image message.
 ///
 void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
-    // TODO: so far these states are only for the free drive (w/o obstacles) and probably not even complete, yet
     auto currentImage = convertImageMessage(imgIn);
     cv::Mat homographedImg;
     if(!image_operator_.homographImage(*currentImage, homographedImg)) {
@@ -93,8 +92,14 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     cv::cvtColor(homographedImg, debugImg_, CV_GRAY2RGB);
 #endif
 
+    // Find lines in the image with Hough
     std::vector<Line> linesInImage;
     findLinesWithHough(homographedImg, linesInImage);
+
+    if(linesInImage.empty()) {
+    	ROS_ERROR("No Hough lines found");
+    	return;
+    }
 
 #ifdef PUBLISH_DEBUG
     if(drawDebugLines_) {
@@ -116,18 +121,30 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
 
     findLaneMarkings(linesInImage);
 
+    // Publish the driving line message
     drive_ros_msgs::DrivingLine drivingLineMsg;
-    auto dl = roadModel.getDrivingLine();
-    drivingLineMsg.detectionRange = dl.detectionRange;
-    drivingLineMsg.polynom_order = dl.poly.getOrder();
+    auto drivingLinePoly = roadModel.getDrivingLinePts();
+    drivingLineMsg.detectionRange = maxSenseRange_; // TODO: this is not really correct. what is it used for in the generator?
+    drivingLineMsg.polynom_order = drivingLinePoly.getOrder();
 
-    for(auto c : dl.poly.getCoeffs()) {
+    for(auto c : drivingLinePoly.getCoeffs()) {
     	drivingLineMsg.polynom_params.push_back(c);
     }
 
     drivingLinePub.publish(drivingLineMsg);
 
 #ifdef PUBLISH_DEBUG
+    std::vector<cv::Point2f> worldPts, imgPts;
+
+    for(float x = 0.3f; x < maxSenseRange_; x += .2f) {
+    	worldPts.push_back(cv::Point2f(x, drivingLinePoly.atX(x)));
+    }
+
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+
+    for(int i = 1; i < imgPts.size(); i++) {
+    	cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), cv::Scalar(0,255), 2, cv::LINE_AA);
+    }
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
 #endif
 
@@ -141,227 +158,67 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     cv::Point2f segStartWorld(0.3f, 0.f);
     float segAngle = 0.f;
     float totalSegLength = 0.f;
-    bool findIntersectionExit = false;
     std::vector<Segment> foundSegments;
     std::vector<Line*> unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings;
     std::vector<cv::RotatedRect> regions;
-    std::vector<cv::Point2f> worldPts, imgPts;
 
     ROS_INFO("------------- New image ------------------");
-    ///////////////////////////////////////////////////////
-    // Find lane markings based on distance and angel to each other
-    ///////////////////////////////////////////////////////
-
-//    for(int i = 0; i < lines.size(); i++) {
-//        float lineAngle = lines.at(i).getAngle();
-//        for(int j = i + 1; j < lines.size(); j++) {
-//            float angleDiff = fabsf(lineAngle - lines.at(j).getAngle());
-//            if(angleDiff < ((3.f / 180.f) * M_PI)) { // TODO: in config
-//                float lineDist = distanceBetweenLines(lines.at(i), lines.at(j));
-//                if(lineDist < 0.05f /* && lineDist > 0.02f */) { // TODO: in config
-//                    // TODO: maybe make sure the two lines are beside each other, not connecting to a longer line
-//
-//                	std::vector<cv::Point2f> tmp;
-//                	tmp.push_back(lines.at(i).wP1_);
-//                	tmp.push_back(lines.at(i).wP2_);
-//                	tmp.push_back(lines.at(j).wP1_);
-//                	tmp.push_back(lines.at(j).wP2_);
-//
-//                	auto rect = cv::minAreaRect(tmp);
-//                	float rectAngle = rect.angle;
-//                	cv::Size2f rectSize = rect.size;
-//
-//                	if (rect.angle < -45.) {
-//                		rectAngle += 90.0;
-//                		cv::swap(rectSize.width, rectSize.height);
-//                	}
-//
-//#if 0
-//                	// Draw boxes for debugging
-//                	cv::Point2f edges[4];
-//                	rect.points(edges);
-//
-//                	std::vector<cv::Point2f> tmpW, tmpI;
-//                	for(int i = 0; i < 4; i++)
-//                		tmpW.push_back(edges[i]);
-//
-//                	image_operator_.worldToWarpedImg(tmpW, tmpI);
-//
-//                	for(int i = 0; i < 4; i++)
-//                		cv::line(debugImg_, tmpI.at(i), tmpI.at((i+1)%4), cv::Scalar(255));
-//#endif
-//
-//                	float alpha = (rectAngle / 180.f) * M_PI;
-//                	cv::Vec2f v(cos(alpha) * rectSize.width,
-//                			    sin(alpha) * rectSize.width);
-//                	v = v * .5f;
-//
-//                	cv::Point2f w1 = rect.center;
-//                	cv::Point2f w2 = rect.center;
-//
-//                	w1.x -= v(0);
-//                	w1.y -= v(1);
-//                	w2.x += v(0);
-//					w2.y += v(1);
-//
-//                	worldPts.push_back(w1);
-//                	worldPts.push_back(w2);
-//
-//                }
-//            }
-//        }
-//    }
-//
-//    image_operator_.worldToWarpedImg(worldPts, imgPts);
-//
-//    for(int i = 0; i < worldPts.size(); i += 2) {
-//    	unusedLines.push_back(new Line(imgPts.at(i), imgPts.at(i+1), worldPts.at(i), worldPts.at(i+1)));
-//    }
 
     for(int i = 0; i < lines.size(); i++) {
     	unusedLines.push_back(&(lines.at(i)));
     }
 
-#if 1
-    // draw the filtered lines
-    for(auto l : unusedLines) {
-    	cv::line(debugImg_, l->iP1_, l->iP2_, cv::Scalar(0,0,255), 2);
-    }
-#endif
-
-    worldPts.clear();
-    imgPts.clear();
-
     // ================================
     // Find lane in new image
     // ================================
+    std::vector<cv::Point2f> segmentStarts;
+    std::vector<float> segmentAngles;
+    int numSegmentsToUse = maxSenseRange_ / segmentLength_;
+    bool useRoadModelSegment = true;
+    roadModel.getSegmentPositions(segmentStarts, segmentAngles, imgTimestamp);
     roadModel.getSegmentSearchStart(segStartWorld, segAngle);
 
-    // Draw the segment search start point
-    worldPts.push_back(segStartWorld);
-    image_operator_.worldToWarpedImg(worldPts, imgPts);
-    cv::drawMarker(debugImg_, imgPts.at(0), cv::Scalar(0,255), cv::MARKER_TILTED_CROSS, 8, 3);
-
-    while((totalSegLength < maxSenseRange_) || findIntersectionExit) {
+    for(int i = 0; i < numSegmentsToUse; i++) {
     	// clear the marking vectors. Otherwise the old ones stay in there.
     	leftMarkings.clear();
     	midMarkings.clear();
     	rightMarkings.clear();
     	otherMarkings.clear();
 
-    	ROS_INFO("Segment #%lu", foundSegments.size() + 1);
+    	ROS_INFO("Segment #%u", i+1);
+
+    	// If we did not find a segment at the previous position use one from the road model
+    	if(useRoadModelSegment) {
+    		if(i < segmentStarts.size()) {
+    			segStartWorld = segmentStarts.at(i);
+    			segAngle = segmentAngles.at(i);
+    		}
+    	}
+
         regions = buildRegions(segStartWorld, segAngle);
 		assignLinesToRegions(&regions, unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings);
         auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle);
 
-        if(seg.length < 0.05f) {
-        	break;
-        }
-
         // If this is the first segment we can use nullptr as argument for previousSegment
-        if(roadModel.segmentFitsToPrevious(
-        		foundSegments.empty() ?  nullptr : &foundSegments.back(), // prev segment or nullptr if empty
-				&seg,
-				foundSegments.empty())) // first segment?
+        if(roadModel.segmentFitsToPrevious(&seg, i))
         {
-        	foundSegments.push_back(seg);
+        	seg.creationTimestamp = imgTimestamp;
+        	roadModel.updateSegmentAtIndex(seg, i);
+
         	segAngle = seg.angleTotal; // the current angle of the lane
+        	totalSegLength += seg.length;
+			segStartWorld = seg.endPositionWorld;
+			useRoadModelSegment = false;
         } else {
-        	break;
+        	ROS_INFO("Segment does not fit with previous");
+        	useRoadModelSegment = true;
+        	roadModel.decreaseSegmentTtl(i);
         }
 
-        totalSegLength += seg.length;
-        segStartWorld = seg.endPositionWorld;
-
-#ifdef PUBLISH_DEBUG
-        cv::drawMarker(debugImg_, imgPts.at(0), cv::Scalar(0,200,200), cv::MARKER_DIAMOND, 8, 4);
-        cv::line(debugImg_, seg.positionImage, seg.endPositionImage, cv::Scalar(0,200,200), 2);
-#endif
-
-#if 0
-        // ================================
-        // Search for an intersection
-		// ================================
-        Segment intersectionSegment;
-        findIntersectionExit = false;
-        if(findIntersection(intersectionSegment, segAngle, segStartWorld, leftMarkings, midMarkings, rightMarkings)) {
-        	if(roadModel.segmentFitsToPrevious(&foundSegments.back(), &intersectionSegment, false)) {
-        		foundSegments.push_back(intersectionSegment);
-        		totalSegLength += intersectionSegment.length;
-        		segAngle = intersectionSegment.angleTotal; // the current angle of the lane
-        		// Move the segment start forward
-        		segStartWorld.x = intersectionSegment.positionWorld.x + cos(intersectionSegment.angleTotal) * intersectionSegment.length;
-				segStartWorld.y = intersectionSegment.positionWorld.y + sin(intersectionSegment.angleTotal) * intersectionSegment.length;
-        		findIntersectionExit = true;
-        	} else {
-        		ROS_WARN("Intersection segment not plausible");
-        		break;
-        	}
-        }
-#endif
-
-        // only used unused lines for the next iteration
-//        unusedLines = otherMarkings;
     }
 
-//    ROS_INFO("Detection range = %.2f", totalSegLength);
-    bool segmentsValid = roadModel.addSegments(foundSegments, imgTimestamp);
-
-#ifdef PUBLISH_DEBUG
-    auto transformedLane = roadModel.getDrivingLinePts();
-
-    worldPts.clear();
-    imgPts.clear();
-
-    if(!transformedLane.empty()) {
-    	for(int i = 0; i < transformedLane.size(); i++) {
-    		worldPts.push_back(cv::Point2f(transformedLane.at(i).x(), transformedLane.at(i).y()));
-    	}
-    	image_operator_.worldToWarpedImg(worldPts, imgPts);
-
-        cv::Scalar trajColor = segmentsValid ? cv::Scalar(0,255) : cv::Scalar(255);
-    	for(int i = 1; i < imgPts.size(); i++) {
-            cv::circle(debugImg_, imgPts.at(i), 5, trajColor, 2, cv::LINE_AA);
-            cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), trajColor, 2, cv::LINE_AA);
-    	}
-    }
-
-//    if(foundSegments.size() > 0) {
-//    	// ego lane in orange
-//    	cv::circle(debugImg_, foundSegments.at(0).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
-////    	// left lane marking in purple
-////    	cv::circle(debugImg_, foundSegments.at(0).leftPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-////    	// right lane marking in purple
-////    	cv::circle(debugImg_, foundSegments.at(0).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-////    	// mid lane marking in yellow
-////    	cv::circle(debugImg_, foundSegments.at(0).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
-//    }
-//
-//    for(int i = 1; i < foundSegments.size(); i++) {
-//    	// ego lane in orange
-//    	cv::circle(debugImg_, foundSegments.at(i).positionImage, 5, cv::Scalar(255,128), 2, cv::LINE_AA);
-//    	cv::line(debugImg_, foundSegments.at(i-1).positionImage, foundSegments.at(i).positionImage, cv::Scalar(255,128), 2, cv::LINE_AA);
-////    	if(!foundSegments.at(i).isIntersection() && !foundSegments.at(i-1).isIntersection()) {
-////    		// left lane marking in purple
-////    		cv::line(debugImg_, foundSegments.at(i-1).leftPosI, foundSegments.at(i).leftPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
-////    		cv::circle(debugImg_, foundSegments.at(i).leftPosI, 3, cv::Scalar(153, 0, 204), 1, cv::LINE_AA);
-////    		// right lane marking in purple
-////    		cv::line(debugImg_, foundSegments.at(i-1).rightPosI, foundSegments.at(i).rightPosI, cv::Scalar(153,0,204), 2, cv::LINE_AA);
-////    		cv::circle(debugImg_, foundSegments.at(i).rightPosI, 3, cv::Scalar(153,0,204), 1, cv::LINE_AA);
-////    		// mid lane marking in yellow
-////    		cv::line(debugImg_, foundSegments.at(i-1).midPosI, foundSegments.at(i).midPosI, cv::Scalar(255,255), 2, cv::LINE_AA);
-////    		cv::circle(debugImg_, foundSegments.at(i).midPosI, 3, cv::Scalar(255,255), 1, cv::LINE_AA);
-////    	}
-//    }
-
-//    for(auto m : unusedLines) {
-//    	cv::line(debugImg_, m->iP1_, m->iP2_, cv::Scalar(0,180), 2, cv::LINE_AA);
-//    }
-#endif
-
-//    for(auto l : unusedLines) {
-//    	delete l;
-//    }
+    roadModel.setOdomPointsForSegments();
+    roadModel.decreaseAllSegmentTtl();
 }
 
 ///
@@ -604,9 +461,9 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     std::uniform_int_distribution<int> distribution(0, numLines - 1);
 
     ROS_INFO("---- RANSAC ----");
-    ROS_INFO_STREAM("Left markings: " << leftMarkings.size());
-    ROS_INFO_STREAM("Mid markings: " << midMarkings.size());
-    ROS_INFO_STREAM("Right markings: " << rightMarkings.size());
+//    ROS_INFO_STREAM("Left markings: " << leftMarkings.size());
+//    ROS_INFO_STREAM("Mid markings: " << midMarkings.size());
+//    ROS_INFO_STREAM("Right markings: " << rightMarkings.size());
 
     while(bestScore < 0.9 && (iteration++ < maxRansacInterations_)) {
         // Select a random line and get its angle
@@ -711,9 +568,9 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	}
     }
 
-    ROS_INFO("Left inliers: %lu", leftInlierPtsWorld.size() / 2);
-    ROS_INFO("Mid inliers: %lu", midInlierPtsWorld.size() / 2);
-    ROS_INFO("Right inliers: %lu", rightInlierPtsWorld.size() / 2);
+//    ROS_INFO("Left inliers: %lu", leftInlierPtsWorld.size() / 2);
+//    ROS_INFO("Mid inliers: %lu", midInlierPtsWorld.size() / 2);
+//    ROS_INFO("Right inliers: %lu", rightInlierPtsWorld.size() / 2);
 
     // 5) Fit polynom in each line
     if(!leftInlierPtsWorld.empty()) {

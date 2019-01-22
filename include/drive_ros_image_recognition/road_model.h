@@ -15,13 +15,13 @@ enum SegmentType {
 	NORMAL_ROAD, INTERSECTION_STOP, INTERSECTION_GO_STRAIGHT
 };
 
-void transformOdomPointsToRearAxis(
+bool transformOdomPointsToRearAxis(
 		tf::TransformListener *pTfListener,
 		std::vector<tf::Stamped<tf::Point>> &odomPts,
 		std::vector<tf::Stamped<tf::Point>> &rearAxisPts,
 		ros::Time stamp);
 
-void transformRearAxisPointsToOdom(
+bool transformRearAxisPointsToOdom(
 		tf::TransformListener *pTfListener,
 		std::vector<cv::Point2f> &rearAxisPts,
 		std::vector<tf::Stamped<tf::Point>> &odomPts,
@@ -38,10 +38,12 @@ struct Segment {
     float length; // Length of the segment in world coordinates [m]
     float probablity; // The probability of this segment
     SegmentType segmentType = SegmentType::NORMAL_ROAD;
+    int ttl = 4;
 
     // Values for use with odometry
-    tf::Stamped<tf::Point> odomPosition;
+    tf::Stamped<tf::Point> odomPosition, odomStart, odomEnd;
     ros::Time creationTimestamp;
+    bool odomPointsSet = false;
 
     Segment()
     : probablity(0.f)
@@ -106,10 +108,16 @@ public:
     bool addSegments(std::vector<Segment> &newSegments, ros::Time timestamp);
     void getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const;
 
+    void getSegmentPositions(std::vector<cv::Point2f> &positions, std::vector<float> &angles, ros::Time stamp);
+    void updateSegmentAtIndex(Segment &seg, int index);
+    void setOdomPointsForSegments();
+    void decreaseAllSegmentTtl();
+    void decreaseSegmentTtl(int index);
+
     // TODO: is this check necessary here? or already done in line_detection?
-    bool segmentFitsToPrevious(Segment *previousSegment, Segment *segmentToAdd, bool isFirstSegment);
+    bool segmentFitsToPrevious(Segment *segmentToAdd, int index);
     // TODO: maybe add parameters for range
-    std::vector<tf::Stamped<tf::Point>> getDrivingLinePts();
+    Polynom getDrivingLinePts();
 };
 
 } // namespace drive_ros_image_recognition
