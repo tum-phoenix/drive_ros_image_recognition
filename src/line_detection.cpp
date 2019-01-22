@@ -20,7 +20,7 @@ LineDetection::LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
     , pnh_(pnh)
     , imageTransport_(pnh)
     , laneWidthWorld_(0.4)
-	, lineVar_(0.1)
+	, laneVar_(0.1)
     , segmentLength_(0.2)
 	, maxSenseRange_(1.6)
 	, maxRansacInterations_(200)
@@ -96,6 +96,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     std::vector<Line> linesInImage;
     findLinesWithHough(homographedImg, linesInImage);
 
+#ifdef PUBLISH_DEBUG
     if(drawDebugLines_) {
         // Draw the Hough lines
         for(auto l : linesInImage) {
@@ -111,6 +112,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
 
         cv::line(debugImg_, imagePts.at(0), imagePts.at(1), cv::Scalar(0,0,255), 4, cv::LINE_AA);
     }
+#endif
 
     findLaneMarkings(linesInImage);
 
@@ -150,72 +152,82 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     // Find lane markings based on distance and angel to each other
     ///////////////////////////////////////////////////////
 
+//    for(int i = 0; i < lines.size(); i++) {
+//        float lineAngle = lines.at(i).getAngle();
+//        for(int j = i + 1; j < lines.size(); j++) {
+//            float angleDiff = fabsf(lineAngle - lines.at(j).getAngle());
+//            if(angleDiff < ((3.f / 180.f) * M_PI)) { // TODO: in config
+//                float lineDist = distanceBetweenLines(lines.at(i), lines.at(j));
+//                if(lineDist < 0.05f /* && lineDist > 0.02f */) { // TODO: in config
+//                    // TODO: maybe make sure the two lines are beside each other, not connecting to a longer line
+//
+//                	std::vector<cv::Point2f> tmp;
+//                	tmp.push_back(lines.at(i).wP1_);
+//                	tmp.push_back(lines.at(i).wP2_);
+//                	tmp.push_back(lines.at(j).wP1_);
+//                	tmp.push_back(lines.at(j).wP2_);
+//
+//                	auto rect = cv::minAreaRect(tmp);
+//                	float rectAngle = rect.angle;
+//                	cv::Size2f rectSize = rect.size;
+//
+//                	if (rect.angle < -45.) {
+//                		rectAngle += 90.0;
+//                		cv::swap(rectSize.width, rectSize.height);
+//                	}
+//
+//#if 0
+//                	// Draw boxes for debugging
+//                	cv::Point2f edges[4];
+//                	rect.points(edges);
+//
+//                	std::vector<cv::Point2f> tmpW, tmpI;
+//                	for(int i = 0; i < 4; i++)
+//                		tmpW.push_back(edges[i]);
+//
+//                	image_operator_.worldToWarpedImg(tmpW, tmpI);
+//
+//                	for(int i = 0; i < 4; i++)
+//                		cv::line(debugImg_, tmpI.at(i), tmpI.at((i+1)%4), cv::Scalar(255));
+//#endif
+//
+//                	float alpha = (rectAngle / 180.f) * M_PI;
+//                	cv::Vec2f v(cos(alpha) * rectSize.width,
+//                			    sin(alpha) * rectSize.width);
+//                	v = v * .5f;
+//
+//                	cv::Point2f w1 = rect.center;
+//                	cv::Point2f w2 = rect.center;
+//
+//                	w1.x -= v(0);
+//                	w1.y -= v(1);
+//                	w2.x += v(0);
+//					w2.y += v(1);
+//
+//                	worldPts.push_back(w1);
+//                	worldPts.push_back(w2);
+//
+//                }
+//            }
+//        }
+//    }
+//
+//    image_operator_.worldToWarpedImg(worldPts, imgPts);
+//
+//    for(int i = 0; i < worldPts.size(); i += 2) {
+//    	unusedLines.push_back(new Line(imgPts.at(i), imgPts.at(i+1), worldPts.at(i), worldPts.at(i+1)));
+//    }
+
     for(int i = 0; i < lines.size(); i++) {
-        float lineAngle = lines.at(i).getAngle();
-        for(int j = i + 1; j < lines.size(); j++) {
-            float angleDiff = fabsf(lineAngle - lines.at(j).getAngle());
-            if(angleDiff < ((3.f / 180.f) * M_PI)) { // TODO: in config
-                float lineDist = distanceBetweenLines(lines.at(i), lines.at(j));
-                if(lineDist < 0.05f && lineDist > 0.02f) { // TODO: in config
-                    // TODO: maybe make sure the two lines are beside each other, not connecting to a longer line
-                	// TODO: maybe only use every index once -> if j is used, do not use it again later
+    	unusedLines.push_back(&(lines.at(i)));
+    }
 
-                	std::vector<cv::Point2f> tmp;
-                	tmp.push_back(lines.at(i).wP1_);
-                	tmp.push_back(lines.at(i).wP2_);
-                	tmp.push_back(lines.at(j).wP1_);
-                	tmp.push_back(lines.at(j).wP2_);
-
-                	auto rect = cv::minAreaRect(tmp);
-                	float rectAngle = rect.angle;
-                	cv::Size2f rectSize = rect.size;
-
-                	if (rect.angle < -45.) {
-                		rectAngle += 90.0;
-                		cv::swap(rectSize.width, rectSize.height);
-                	}
-
-#if 0
-                	// Draw boxes for debugging
-                	cv::Point2f edges[4];
-                	rect.points(edges);
-
-                	std::vector<cv::Point2f> tmpW, tmpI;
-                	for(int i = 0; i < 4; i++)
-                		tmpW.push_back(edges[i]);
-
-                	image_operator_.worldToWarpedImg(tmpW, tmpI);
-
-                	for(int i = 0; i < 4; i++)
-                		cv::line(debugImg_, tmpI.at(i), tmpI.at((i+1)%4), cv::Scalar(255));
+#if 1
+    // draw the filtered lines
+    for(auto l : unusedLines) {
+    	cv::line(debugImg_, l->iP1_, l->iP2_, cv::Scalar(0,0,255), 2);
+    }
 #endif
-
-                	float alpha = (rectAngle / 180.f) * M_PI;
-                	cv::Vec2f v(cos(alpha) * rectSize.width,
-                			    sin(alpha) * rectSize.width);
-                	v = v * .5f;
-
-                	cv::Point2f w1 = rect.center;
-                	cv::Point2f w2 = rect.center;
-
-                	w1.x -= v(0);
-                	w1.y -= v(1);
-                	w2.x += v(0);
-					w2.y += v(1);
-
-                	worldPts.push_back(w1);
-                	worldPts.push_back(w2);
-
-                }
-            }
-        }
-    }
-
-    image_operator_.worldToWarpedImg(worldPts, imgPts);
-
-    for(int i = 0; i < worldPts.size(); i += 2) {
-    	unusedLines.push_back(new Line(imgPts.at(i), imgPts.at(i+1), worldPts.at(i), worldPts.at(i+1)));
-    }
 
     worldPts.clear();
     imgPts.clear();
@@ -237,6 +249,7 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     	rightMarkings.clear();
     	otherMarkings.clear();
 
+    	ROS_INFO("Segment #%lu", foundSegments.size() + 1);
         regions = buildRegions(segStartWorld, segAngle);
 		assignLinesToRegions(&regions, unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings);
         auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle);
@@ -258,9 +271,12 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         }
 
         totalSegLength += seg.length;
-        // Move the segment start forward
-        segStartWorld.x = seg.positionWorld.x + cos(seg.angleTotal) * seg.length;
-        segStartWorld.y = seg.positionWorld.y + sin(seg.angleTotal) * seg.length;
+        segStartWorld = seg.endPositionWorld;
+
+#ifdef PUBLISH_DEBUG
+        cv::drawMarker(debugImg_, imgPts.at(0), cv::Scalar(0,200,200), cv::MARKER_DIAMOND, 8, 4);
+        cv::line(debugImg_, seg.positionImage, seg.endPositionImage, cv::Scalar(0,200,200), 2);
+#endif
 
 #if 0
         // ================================
@@ -343,9 +359,9 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 //    }
 #endif
 
-    for(auto l : unusedLines) {
-    	delete l;
-    }
+//    for(auto l : unusedLines) {
+//    	delete l;
+//    }
 }
 
 ///
@@ -369,7 +385,7 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
     // Calculate the region size in world coordinates and then convert to size in image coordinates
     cv::Point2f worldPtOuterRegionSize(positionWorld.x + segmentLength_, positionWorld.y + (1.2f * laneWidthWorld_));
     worldPts.at(0) = worldPtOuterRegionSize;
-    cv::Point2f worldPtMiddleRegionSize(positionWorld.x + segmentLength_, positionWorld.y + (0.8f * laneWidthWorld_));
+    cv::Point2f worldPtMiddleRegionSize(positionWorld.x + segmentLength_, positionWorld.y + (1.f * laneWidthWorld_));
     worldPts.at(1) = worldPtMiddleRegionSize;
     image_operator_.worldToWarpedImg(worldPts, imgPts);
     cv::Size outerRegionSize(imgPts.at(0).x - positionImg.x, positionImg.y - imgPts.at(0).y);
@@ -459,8 +475,8 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     if(!linePointsWorld.empty()) {
     	auto rotatedRect = cv::minAreaRect(linePointsWorld);
     	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-//    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
-    		leftMarkings.clear();
+    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+//    		leftMarkings.clear();
     	}
     }
 
@@ -485,8 +501,8 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     if(!linePointsWorld.empty()) {
     	auto rotatedRect = cv::minAreaRect(linePointsWorld);
     	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-//    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
-    		rightMarkings.clear();
+    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+//    		rightMarkings.clear();
     	}
     }
 }
@@ -580,17 +596,17 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
     if(numLines == 0) {
-//        ROS_WARN("No lines for Ransac");
+        ROS_WARN("No lines for Ransac");
         return Segment(segStartWorld, imgPts.at(0), 0.f, prevAngle, segmentLength_, 0.f);
     }
 
     std::default_random_engine generator;
     std::uniform_int_distribution<int> distribution(0, numLines - 1);
 
-//    ROS_INFO("---- RANSAC ----");
-//    ROS_INFO_STREAM("Left markings: " << leftMarkings.size());
-//    ROS_INFO_STREAM("Mid markings: " << midMarkings.size());
-//    ROS_INFO_STREAM("Right markings: " << rightMarkings.size());
+    ROS_INFO("---- RANSAC ----");
+    ROS_INFO_STREAM("Left markings: " << leftMarkings.size());
+    ROS_INFO_STREAM("Mid markings: " << midMarkings.size());
+    ROS_INFO_STREAM("Right markings: " << rightMarkings.size());
 
     while(bestScore < 0.9 && (iteration++ < maxRansacInterations_)) {
         // Select a random line and get its angle
@@ -614,19 +630,19 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
         int numInliers = 0;
 
         std::function<bool (Line*)> lineCmpFunc = [this, currentAngle, currentLine](Line *l) {
-        	if(fabsf(l->getAngle() - currentAngle) < (3.f / 180.f * M_PI)) {
+        	if(fabsf(l->getAngle() - currentAngle) < (5.f / 180.f * M_PI)) {
         		// angle diff should be < 3 [degree]
         		float distanceToLine = distanceBetweenLines(*l, *currentLine);
 
-        		if(distanceToLine < 0.02f) {
+        		if(distanceToLine < laneVar_) {
         			return true;
         		}
 
-        		if(fabsf(distanceToLine - laneWidthWorld_) < 0.03f) {
+        		if(fabsf(distanceToLine - laneWidthWorld_) < laneVar_) {
         			return true;
         		}
 
-        		if(fabsf(distanceToLine - 2*laneWidthWorld_) < 0.03f) {
+        		if(fabsf(distanceToLine - 2*laneWidthWorld_) < laneVar_) {
         			return true;
         		}
 
@@ -649,19 +665,19 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 
     // 4) Collect points from every lane marking
     std::function<bool (Line*)> inlierFunc = [this, bestAngle, bestLine](Line *l) {
-    	if(fabsf(l->getAngle() - bestAngle) < (3.f / 180.f * M_PI)) {
+    	if(fabsf(l->getAngle() - bestAngle) < (5.f / 180.f * M_PI)) {
     		// angle diff should be < 3 [degree]
     		float distanceToLine = distanceBetweenLines(*l, *bestLine);
 
-    		if(distanceToLine < 0.02f) {
+    		if(distanceToLine < laneVar_) {
     			return true;
     		}
 
-    		if(fabsf(distanceToLine - laneWidthWorld_) < 0.03f) {
+    		if(fabsf(distanceToLine - laneWidthWorld_) < laneVar_) {
     			return true;
     		}
 
-    		if(fabsf(distanceToLine - 2*laneWidthWorld_) < 0.03f) {
+    		if(fabsf(distanceToLine - 2*laneWidthWorld_) < laneVar_) {
     			return true;
     		}
 
@@ -694,6 +710,10 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     		rightInlierPtsWorld.push_back(l->wP2_);
     	}
     }
+
+    ROS_INFO("Left inliers: %lu", leftInlierPtsWorld.size() / 2);
+    ROS_INFO("Mid inliers: %lu", midInlierPtsWorld.size() / 2);
+    ROS_INFO("Right inliers: %lu", rightInlierPtsWorld.size() / 2);
 
     // 5) Fit polynom in each line
     if(!leftInlierPtsWorld.empty()) {
@@ -809,30 +829,34 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	}
     }
 
+    detectedRange /= numLaneMarkingsDetected;
+    float segmentLen = std::min(detectedRange - segStartWorld.x, segmentLength_);
+    cv::Point2f segEndWorld;
+    segEndWorld.x = laneMidPt.x + cos(bestAngle) * segmentLen;
+    segEndWorld.y = laneMidPt.y + sin(bestAngle) * segmentLen;
+
 
     // Convert all needed points to image coordinates
     worldPts.clear();
     imgPts.clear();
-    worldPts.push_back(laneMidPt);
-    worldPts.push_back(bestLeft);
-    worldPts.push_back(bestMid);
-    worldPts.push_back(bestRight);
+    worldPts.push_back(laneMidPt); // idx 0
+    worldPts.push_back(bestLeft); // idx 1
+    worldPts.push_back(bestMid); // idx 2
+    worldPts.push_back(bestRight); // idx 3
+    worldPts.push_back(segEndWorld); // idx 4
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
-    auto lengthVec = bestMid - segStartWorld;
-//    auto segLen = sqrt(lengthVec.x*lengthVec.x + lengthVec.y*lengthVec.y);
-    detectedRange /= numLaneMarkingsDetected;
-
     // Create the segment
-    Segment s(laneMidPt, imgPts.at(0), prevAngle - bestAngle, bestAngle, detectedRange - segStartWorld.x, bestScore);
+    Segment s(laneMidPt, imgPts.at(0), prevAngle - bestAngle, bestAngle, segmentLen, bestScore);
     s.leftPosW = bestLeft;
     s.midPosW = bestMid;
     s.rightPosW = bestRight;
     s.leftPosI = imgPts.at(1);
     s.midPosI = imgPts.at(2);
     s.rightPosI = imgPts.at(3);
+    s.endPositionImage = imgPts.at(4);
+    s.endPositionWorld = segEndWorld;
 
-    cv::drawMarker(debugImg_, imgPts.at(0), cv::Scalar(0,200,200), cv::MARKER_DIAMOND, 8, 4);
 //    ROS_INFO("Orig segmentStart: (%.2f, %.2f)", segStartWorld.x, segStartWorld.y);
 //    ROS_INFO("New lane mid: (%.2f, %.2f)", laneMidPt.x, laneMidPt.y);
 //    ROS_INFO("Detected range = %.2f, segment length = %.3f", detectedRange, (detectedRange - segStartWorld.x));
@@ -1114,7 +1138,7 @@ void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
     image_operator_.setConfig(config);
     drawDebugLines_ = config.draw_debug;
     laneWidthWorld_ = config.lane_width;
-    lineVar_ = config.lane_var;
+    laneVar_ = config.lane_var;
     lineAngle_ = config.lineAngle;
     maxSenseRange_ = config.maxSenseRange;
     cannyThreshold_ = config.cannyThreshold;

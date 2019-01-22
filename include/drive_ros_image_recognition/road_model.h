@@ -30,6 +30,7 @@ void transformRearAxisPointsToOdom(
 struct Segment {
     cv::Point2f positionWorld;
     cv::Point2f positionImage;
+    cv::Point2f endPositionWorld, endPositionImage;
     cv::Point2f leftPosW, midPosW, rightPosW; // These points lay on the left/mid/right line marking
     cv::Point2f leftPosI, midPosI, rightPosI;
     float angleDiff; // The angle difference to the previous segment

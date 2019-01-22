@@ -29,7 +29,7 @@ private:
   bool drawDebugLines_;
   float laneWidthWorld_;
   float lineAngle_; // not used at the moment
-  float lineVar_;
+  float laneVar_;
   float maxSenseRange_;
   int cannyThreshold_;
   int houghThresold_;
