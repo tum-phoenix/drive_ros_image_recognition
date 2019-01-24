@@ -87,8 +87,10 @@ struct DrivingLane {
 class RoadModel {
 	tf::TransformListener *pTfListener;
 	DrivingLane dl;
-	std::vector<Segment> segmentsToDl;
+
+    Polynom currentDrivingLinePoly;
 	int defaultPolyOrder = 2;
+    float maxPolyError = 10.f;
 	int noNewSegmentsCtr = 0; // DEBUG
     float laneWidth;
     bool driveStraight = false;
@@ -100,9 +102,13 @@ public:
 	{
 	}
 
+    std::vector<Segment> segmentsToDl; // TODO: make private again
+
     DrivingLane getDrivingLine() { return dl; }
 
     inline void setLaneWidth(float w) { laneWidth = w; }
+    inline void setDefaultPolyOrder(int o) { defaultPolyOrder = o; }
+    inline void setMaxPolyErrorThresh(float t) { maxPolyError = t; }
 
     // Segment based
     bool addSegments(std::vector<Segment> &newSegments, ros::Time timestamp);
@@ -117,7 +123,7 @@ public:
     // TODO: is this check necessary here? or already done in line_detection?
     bool segmentFitsToPrevious(Segment *segmentToAdd, int index);
     // TODO: maybe add parameters for range
-    Polynom getDrivingLinePts();
+    Polynom getDrivingLinePts(float &detectionRange);
 };
 
 } // namespace drive_ros_image_recognition

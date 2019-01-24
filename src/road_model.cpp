@@ -180,11 +180,11 @@ void RoadModel::setOdomPointsForSegments() {
 
 void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
 	ROS_INFO("updateSegmentAtIndex %u", index);
-	std::vector<cv::Point2f> rearAxisPts;
-	std::vector<tf::Stamped<tf::Point>> odomPts;
+//	std::vector<cv::Point2f> rearAxisPts;
+//	std::vector<tf::Stamped<tf::Point>> odomPts;
 
-	rearAxisPts.push_back(seg.positionWorld);
-	rearAxisPts.push_back(seg.endPositionImage);
+//	rearAxisPts.push_back(seg.positionWorld);
+//	rearAxisPts.push_back(seg.endPositionImage);
 
 	if(index < segmentsToDl.size()) {
 		segmentsToDl.at(index) = seg;
@@ -198,7 +198,7 @@ void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
 bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index) {
 	ROS_INFO("segmentFitsToPrevious: segmentsToDl.size() = %lu, index = %u", segmentsToDl.size(), index);
 
-	bool isFirstSegment = index == 0;
+    bool isFirstSegment = (index == 0);
 
 	if((!isFirstSegment) && (index > segmentsToDl.size())) {
 		return false;
@@ -228,6 +228,18 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index) {
 			return false;
 		}
 	}
+
+    // Compare to previous polynom
+    // TODO: quick hack. think this through
+    float error = .0f;
+    error += std::fabs(segmentToAdd->positionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->positionWorld.x));
+    error += std::fabs(segmentToAdd->endPositionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->endPositionWorld.x));
+
+    ROS_INFO("  Error based on polynom: %.3f", error);
+
+    if(error > maxPolyError) {
+        return false;
+    }
 
 	return true;
 }
@@ -348,8 +360,8 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 
 		// 2) Compare the current driving line polynom with the old one
 		// TODO: the old polynom is not perfectly correct since we ignore the cars movement
-		float compareRange = std::min(dl.detectionRange, newDetectionRangeWorld);
-		compareRange = 1.f;
+        float compareRange = std::min(dl.detectionRange, newDetectionRangeWorld);
+        compareRange = 1.5f;
 		int steps = 10;
 		float step = compareRange / steps;
 		float error = 0.f;
@@ -380,7 +392,7 @@ bool RoadModel::addSegments(std::vector<Segment> &newSegments, ros::Time timesta
 	}
 }
 
-Polynom RoadModel::getDrivingLinePts() {
+Polynom RoadModel::getDrivingLinePts(float &detectionRange) {
 	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
 
 	for(auto s : segmentsToDl) {
@@ -388,7 +400,7 @@ Polynom RoadModel::getDrivingLinePts() {
 			ROS_INFO("  Segment.ttl: %i", s.ttl);
 			if(s.ttl > 0) {
 				odomPts.push_back(s.odomStart);
-				odomPts.push_back(s.odomEnd);
+//				odomPts.push_back(s.odomEnd);
 			} else {
 				break;
 			}
@@ -397,7 +409,7 @@ Polynom RoadModel::getDrivingLinePts() {
 		}
 	}
 
-	transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts, ros::Time(0)); // TOD: time not used anymore
+    transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts, ros::Time(0)); // TODO: time not used anymore
 
 	std::vector<cv::Point2f> drivingLinePts;
 	drivingLinePts.push_back(cv::Point2f(.3f, 0.f));
@@ -407,12 +419,15 @@ Polynom RoadModel::getDrivingLinePts() {
 
 	ROS_INFO("Built polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
 
-	if(drivingLinePts.size() == 1) { // we always add a point in front of the vehicle
+    if(drivingLinePts.size() < 2) { // we always add a point in front of the vehicle
 		// return a straight line
+//        drivingLinePts.push_back(cv::Point2f(.3f, 0.f));
 		drivingLinePts.push_back(cv::Point(.6, 0.f));
 	}
+    detectionRange = drivingLinePts.back().x;
 	int polyOrder = (drivingLinePts.size() > 2) ? defaultPolyOrder : 1;
-	return Polynom(polyOrder, drivingLinePts);
+    currentDrivingLinePoly = Polynom(polyOrder, drivingLinePts);
+    return currentDrivingLinePoly;
 }
 
 void RoadModel::decreaseAllSegmentTtl() {

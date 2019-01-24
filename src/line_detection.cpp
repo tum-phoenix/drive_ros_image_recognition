@@ -122,9 +122,10 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     findLaneMarkings(linesInImage);
 
     // Publish the driving line message
+    float detectionRange = .0f;
     drive_ros_msgs::DrivingLine drivingLineMsg;
-    auto drivingLinePoly = roadModel.getDrivingLinePts();
-    drivingLineMsg.detectionRange = maxSenseRange_; // TODO: this is not really correct. what is it used for in the generator?
+    auto drivingLinePoly = roadModel.getDrivingLinePts(detectionRange);
+    drivingLineMsg.detectionRange = detectionRange;
     drivingLineMsg.polynom_order = drivingLinePoly.getOrder();
 
     for(auto c : drivingLinePoly.getCoeffs()) {
@@ -136,9 +137,10 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
 #ifdef PUBLISH_DEBUG
     std::vector<cv::Point2f> worldPts, imgPts;
 
-    for(float x = 0.3f; x < maxSenseRange_; x += .2f) {
+    for(float x = 0.f; x < detectionRange; x += .2f) {
     	worldPts.push_back(cv::Point2f(x, drivingLinePoly.atX(x)));
     }
+    worldPts.push_back(cv::Point2f(detectionRange, drivingLinePoly.atX(detectionRange)));
 
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
@@ -219,6 +221,31 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 
     roadModel.setOdomPointsForSegments();
     roadModel.decreaseAllSegmentTtl();
+
+/*
+    // DEBUG
+    std::vector<cv::Point2f> worldPts, imgPts;
+    std::vector<cv::Scalar> colors;
+    std::vector<float> angles;
+
+    roadModel.getSegmentPositions(worldPts, angles, ros::Time(0));
+    for(auto s : roadModel.segmentsToDl)  {
+        if(s.ttl == 3) {
+            colors.push_back(cv::Scalar(0,0,255));
+        } else if(s.ttl > 0){
+            colors.push_back(cv::Scalar(255));
+        } else {
+            colors.push_back(cv::Scalar(0,0,0));
+        }
+    }
+
+    image_operator_.worldToWarpedImg(worldPts, imgPts);
+
+    ROS_INFO("imgPts: %lu, colors: %lu", imgPts.size(), colors.size());
+    for(int i = 0; i < imgPts.size(); i++) {
+        cv::circle(debugImg_, imgPts.at(i), 10, colors.at(i), 5);
+    }
+*/
 }
 
 ///
@@ -596,16 +623,16 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	detectedRange += xMax;
     	numLaneMarkingsDetected++;
 
-    	for(float x = xMin; x < xMax; x += 0.2f) {
-    		worldPts.push_back(cv::Point2f(x, poly.atX(x)));
-    	}
-    	worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
+//    	for(float x = xMin; x < xMax; x += 0.2f) {
+//    		worldPts.push_back(cv::Point2f(x, poly.atX(x)));
+//    	}
+//    	worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
 
-    	image_operator_.worldToWarpedImg(worldPts, imgPts);
+//    	image_operator_.worldToWarpedImg(worldPts, imgPts);
 
-    	for(auto p : imgPts) {
-    		cv::circle(debugImg_, p, 4, cv::Scalar(0,0,255), 2);
-    	}
+//    	for(auto p : imgPts) {
+//    		cv::circle(debugImg_, p, 4, cv::Scalar(0,0,255), 2);
+//    	}
     }
 
     if(!midInlierPtsWorld.empty()) {
@@ -635,16 +662,16 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 		detectedRange += xMax;
 		numLaneMarkingsDetected++;
 
-		for(float x = xMin; x < xMax; x += 0.2f) {
-			worldPts.push_back(cv::Point2f(x, poly.atX(x)));
-		}
-		worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
+//		for(float x = xMin; x < xMax; x += 0.2f) {
+//			worldPts.push_back(cv::Point2f(x, poly.atX(x)));
+//		}
+//		worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
 
-		image_operator_.worldToWarpedImg(worldPts, imgPts);
+//		image_operator_.worldToWarpedImg(worldPts, imgPts);
 
-		for(auto p : imgPts) {
-			cv::circle(debugImg_, p, 4, cv::Scalar(0,255), 2);
-		}
+//		for(auto p : imgPts) {
+//			cv::circle(debugImg_, p, 4, cv::Scalar(0,255), 2);
+//		}
     }
 
     if(!rightInlierPtsWorld.empty()) {
@@ -674,16 +701,16 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	detectedRange += xMax;
     	numLaneMarkingsDetected++;
 
-    	for(float x = xMin; x < xMax; x += 0.2f) {
-    		worldPts.push_back(cv::Point2f(x, poly.atX(x)));
-    	}
-    	worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
+//    	for(float x = xMin; x < xMax; x += 0.2f) {
+//    		worldPts.push_back(cv::Point2f(x, poly.atX(x)));
+//    	}
+//    	worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
 
-    	image_operator_.worldToWarpedImg(worldPts, imgPts);
+//    	image_operator_.worldToWarpedImg(worldPts, imgPts);
 
-    	for(auto p : imgPts) {
-    		cv::circle(debugImg_, p, 4, cv::Scalar(0,0,255), 2);
-    	}
+//    	for(auto p : imgPts) {
+//    		cv::circle(debugImg_, p, 4, cv::Scalar(0,0,255), 2);
+//    	}
     }
 
     detectedRange /= numLaneMarkingsDetected;
@@ -1006,6 +1033,8 @@ void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
     maxRansacInterations_ = config.ransacIterations;
 
     roadModel.setLaneWidth(laneWidthWorld_);
+    roadModel.setDefaultPolyOrder(config.poly_order);
+    roadModel.setMaxPolyErrorThresh(config.poly_error_thresh);
 }
 
 } // namespace drive_ros_image_recognition
