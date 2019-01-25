@@ -18,7 +18,7 @@ namespace drive_ros_image_recognition {
 LineDetection::LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh)
     : nh_(nh)
     , pnh_(pnh)
-    , imageTransport_(pnh)
+    , imageTransport_(nh)
     , laneWidthWorld_(0.4)
 	, laneVar_(0.1)
     , segmentLength_(0.2)
@@ -44,7 +44,7 @@ bool LineDetection::init() {
     dsrv_server_.setCallback(dsrv_cb_);
 
     //subscribe to camera image
-    imageSubscriber_ = imageTransport_.subscribe("/img_in", 3, &LineDetection::imageCallback, this);
+    imageSubscriber_ = imageTransport_.subscribe("img_in", 3, &LineDetection::imageCallback, this);
     ROS_INFO_STREAM("Subscribed image transport to topic " << imageSubscriber_.getTopic());
 
     odometrySub = pnh_.subscribe("odom_topic", 3, &LineDetection::odometryCallback, this);
