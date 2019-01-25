@@ -137,9 +137,9 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		cv::Point2f startPt(rearAxisPts.at(i).x(),   rearAxisPts.at(i).y());
 		cv::Point2f endPt  (rearAxisPts.at(i+1).x(), rearAxisPts.at(i+1).y());
 
-		ROS_INFO("startPt (%.2f, %.2f)", startPt.x, startPt.y);
-		ROS_INFO("  endPt (%.2f, %.2f)", endPt.x, endPt.y);
-		ROS_INFO(" angle = %.2f", atan2(endPt.y - startPt.y, endPt.x - startPt.x));
+//		ROS_INFO("startPt (%.2f, %.2f)", startPt.x, startPt.y);
+//		ROS_INFO("  endPt (%.2f, %.2f)", endPt.x, endPt.y);
+//		ROS_INFO(" angle = %.2f", atan2(endPt.y - startPt.y, endPt.x - startPt.x));
 
 		if(startPt.x < 0.2f) {
 			ROS_INFO("  remove first point");
@@ -149,7 +149,7 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		}
 	}
 
-	ROS_INFO("Returning %lu positions from %lu segments", positions.size(), odomPts.size() / 2);
+	ROS_INFO("getSegmentPositions: Returning %lu positions from %lu segments", positions.size(), odomPts.size() / 2);
 
 }
 
@@ -400,6 +400,11 @@ Polynom RoadModel::getDrivingLinePts(float &detectionRange) {
 			ROS_INFO("  Segment.ttl: %i", s.ttl);
 			if(s.ttl > 0) {
 				odomPts.push_back(s.odomStart);
+				// Add a point in the middle of the segment
+				auto odomMid = s.odomStart;
+				odomMid.setX(odomMid.x() + .5f * (s.odomEnd.x() - s.odomStart.x()));
+				odomMid.setY(odomMid.y() + .5f * (s.odomEnd.y() - s.odomStart.y()));
+				odomPts.push_back(odomMid);
 //				odomPts.push_back(s.odomEnd);
 			} else {
 				break;
