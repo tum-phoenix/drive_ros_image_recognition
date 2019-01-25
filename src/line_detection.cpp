@@ -178,7 +178,6 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     int numSegmentsToUse = maxSenseRange_ / segmentLength_;
     bool useRoadModelSegment = true;
     roadModel.getSegmentPositions(segmentStarts, segmentAngles, imgTimestamp);
-    roadModel.getSegmentSearchStart(segStartWorld, segAngle);
 
     for(int i = 0; i < numSegmentsToUse; i++) {
     	// clear the marking vectors. Otherwise the old ones stay in there.
@@ -222,7 +221,6 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     roadModel.setOdomPointsForSegments();
     roadModel.decreaseAllSegmentTtl();
 
-/*
     // DEBUG
     std::vector<cv::Point2f> worldPts, imgPts;
     std::vector<cv::Scalar> colors;
@@ -245,7 +243,6 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     for(int i = 0; i < imgPts.size(); i++) {
         cv::circle(debugImg_, imgPts.at(i), 10, colors.at(i), 5);
     }
-*/
 }
 
 ///
@@ -350,6 +347,7 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     	}
     }
 
+    // TODO: look over the idea of building rects around the lines again
 //    ROS_INFO("---");
     std::vector<cv::Point2f> linePointsWorld;
     for(auto l : leftMarkings) {
@@ -359,7 +357,7 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     if(!linePointsWorld.empty()) {
     	auto rotatedRect = cv::minAreaRect(linePointsWorld);
     	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+//    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
 //    		leftMarkings.clear();
     	}
     }
@@ -385,7 +383,7 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
     if(!linePointsWorld.empty()) {
     	auto rotatedRect = cv::minAreaRect(linePointsWorld);
     	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
+//    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
 //    		rightMarkings.clear();
     	}
     }
@@ -549,24 +547,27 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 
     // 4) Collect points from every lane marking
     std::function<bool (Line*)> inlierFunc = [this, bestAngle, bestLine](Line *l) {
-    	if(fabsf(l->getAngle() - bestAngle) < (5.f / 180.f * M_PI)) {
-    		// angle diff should be < 3 [degree]
-    		float distanceToLine = distanceBetweenLines(*l, *bestLine);
-
-    		if(distanceToLine < laneVar_) {
-    			return true;
-    		}
-
-    		if(fabsf(distanceToLine - laneWidthWorld_) < laneVar_) {
-    			return true;
-    		}
-
-    		if(fabsf(distanceToLine - 2*laneWidthWorld_) < laneVar_) {
-    			return true;
-    		}
-
+    	if(fabsf(l->getAngle() - bestAngle) > (5.f / 180.f * M_PI)) {
+    		// angle diff should be < 5 [degree]
     		return false;
     	}
+
+    	float distanceToLine = distanceBetweenLines(*l, *bestLine);
+
+    	if(distanceToLine < laneVar_) {
+    		return true;
+    	}
+
+    	if(fabsf(distanceToLine - laneWidthWorld_) < laneVar_) {
+    		return true;
+    	}
+
+    	if(fabsf(distanceToLine - 2*laneWidthWorld_) < (2*laneVar_)) {
+    		return true;
+    	}
+
+    	return false;
+
     };
 
     std::vector<cv::Point2f> leftInlierPtsWorld, midInlierPtsWorld, rightInlierPtsWorld;
@@ -595,11 +596,12 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	}
     }
 
-//    ROS_INFO("Left inliers: %lu", leftInlierPtsWorld.size() / 2);
-//    ROS_INFO("Mid inliers: %lu", midInlierPtsWorld.size() / 2);
-//    ROS_INFO("Right inliers: %lu", rightInlierPtsWorld.size() / 2);
+    ROS_INFO("  Left inliers: %lu out of %lu", leftInlierPtsWorld.size() / 2, leftMarkings.size());
+    ROS_INFO("  Mid inliers: %lu out of %lu", midInlierPtsWorld.size() / 2, midMarkings.size());
+    ROS_INFO("  Right inliers: %lu out of %lu", rightInlierPtsWorld.size() / 2, rightMarkings.size());
 
     // 5) Fit polynom in each line
+    int lanePosFrom = 0; // DEBUG
     if(!leftInlierPtsWorld.empty()) {
     	Polynom poly(1, leftInlierPtsWorld);
 
@@ -619,6 +621,47 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	// Set lane position
     	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
     	laneMidPt.y -= laneWidthWorld_ * 1.5f;
+    	lanePosFrom = 1;
+
+    	detectedRange += xMax;
+    	numLaneMarkingsDetected++;
+
+//    	for(float x = xMin; x < xMax; x += 0.2f) {
+//    		worldPts.push_back(cv::Point2f(x, poly.atX(x)));
+//    	}
+//    	worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
+
+//    	image_operator_.worldToWarpedImg(worldPts, imgPts);
+
+//    	for(auto p : imgPts) {
+//    		cv::circle(debugImg_, p, 4, cv::Scalar(0,0,255), 2);
+//    	}
+    }
+
+    if(!rightInlierPtsWorld.empty()) {
+    	Polynom poly(1, rightInlierPtsWorld);
+
+    	worldPts.clear();
+    	imgPts.clear();
+
+    	auto minElem = std::min_element(rightInlierPtsWorld.begin(), rightInlierPtsWorld.end(), [](cv::Point2f &a, cv::Point2f &b) {
+    		return a.x < b.x;
+    	});
+    	auto maxElem = std::max_element(rightInlierPtsWorld.begin(), rightInlierPtsWorld.end(), [](cv::Point2f &a, cv::Point2f &b) {
+    		return a.x < b.x;
+    	});
+
+    	float xMin = minElem->x;
+    	float xMax = maxElem->x;
+
+    	if((xMax - xMin) < 0.1f) {
+    		ROS_WARN("right line length = %.3f", (xMax - xMin));
+    	}
+
+    	// Set lane position
+    	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
+    	laneMidPt.y += laneWidthWorld_ * .5f;
+    	lanePosFrom = 3;
 
     	detectedRange += xMax;
     	numLaneMarkingsDetected++;
@@ -658,6 +701,7 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	// Set lane position
 		laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
 		laneMidPt.y -= laneWidthWorld_ * .5f;
+		lanePosFrom = 2;
 
 		detectedRange += xMax;
 		numLaneMarkingsDetected++;
@@ -674,51 +718,11 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 //		}
     }
 
-    if(!rightInlierPtsWorld.empty()) {
-    	Polynom poly(1, rightInlierPtsWorld);
-
-    	worldPts.clear();
-    	imgPts.clear();
-
-    	auto minElem = std::min_element(rightInlierPtsWorld.begin(), rightInlierPtsWorld.end(), [](cv::Point2f &a, cv::Point2f &b) {
-    		return a.x < b.x;
-    	});
-    	auto maxElem = std::max_element(rightInlierPtsWorld.begin(), rightInlierPtsWorld.end(), [](cv::Point2f &a, cv::Point2f &b) {
-    		return a.x < b.x;
-    	});
-
-    	float xMin = minElem->x;
-    	float xMax = maxElem->x;
-
-    	if((xMax - xMin) < 0.1f) {
-    		ROS_WARN("right line length = %.3f", (xMax - xMin));
-    	}
-
-    	// Set lane position
-    	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
-    	laneMidPt.y += laneWidthWorld_ * .5f;
-
-    	detectedRange += xMax;
-    	numLaneMarkingsDetected++;
-
-//    	for(float x = xMin; x < xMax; x += 0.2f) {
-//    		worldPts.push_back(cv::Point2f(x, poly.atX(x)));
-//    	}
-//    	worldPts.push_back(cv::Point2f(xMax, poly.atX(xMax)));
-
-//    	image_operator_.worldToWarpedImg(worldPts, imgPts);
-
-//    	for(auto p : imgPts) {
-//    		cv::circle(debugImg_, p, 4, cv::Scalar(0,0,255), 2);
-//    	}
-    }
-
     detectedRange /= numLaneMarkingsDetected;
     float segmentLen = std::min(detectedRange - segStartWorld.x, segmentLength_);
     cv::Point2f segEndWorld;
     segEndWorld.x = laneMidPt.x + cos(bestAngle) * segmentLen;
     segEndWorld.y = laneMidPt.y + sin(bestAngle) * segmentLen;
-
 
     // Convert all needed points to image coordinates
     worldPts.clear();
@@ -740,6 +744,8 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     s.rightPosI = imgPts.at(3);
     s.endPositionImage = imgPts.at(4);
     s.endPositionWorld = segEndWorld;
+
+    ROS_INFO("  Lane position built from %s line", ((lanePosFrom == 1) ? "left" : ((lanePosFrom == 2) ? "mid" : "right")));
 
 //    ROS_INFO("Orig segmentStart: (%.2f, %.2f)", segStartWorld.x, segStartWorld.y);
 //    ROS_INFO("New lane mid: (%.2f, %.2f)", laneMidPt.x, laneMidPt.y);
@@ -833,79 +839,6 @@ bool LineDetection::findIntersection(Segment &resultingSegment, float segmentAng
 	return foundIntersection;
 }
 
-//cv::Point2f LineDetection::findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine) {
-//	if(drivingLine.empty()) {
-//		return cv::Point2f(1.f, 0.f);
-//	}
-//
-//	// TEST POLYFIT
-//	int order = 4;
-//	cv::Mat srcX(drivingLine.size(), 1, CV_32FC1);
-//	cv::Mat srcY(drivingLine.size(), 1, CV_32FC1);
-//	cv::Mat dst(order+1, 1, CV_32FC1);
-//
-//	for(int i = 0; i < drivingLine.size(); i++) {
-//		srcX.at<float>(i, 0) = drivingLine.at(i).x();
-//		srcY.at<float>(i, 0) = drivingLine.at(i).y();
-//	}
-//
-////	ROS_INFO_STREAM("srcX dims = " << srcX.size << "; srcY dims = " << srcY.size << "; dst dims = " << dst.size);
-//	polyfit(srcX, srcY, dst, order);
-////	ROS_INFO_STREAM("PolyFit = " << dst);
-//
-//	std::vector<cv::Point2f> imagePoints, worldPoints;
-//
-//	ROS_INFO("----------------------------");
-//	if(prevPolyCoeff.rows == (order+1)) {
-//		auto a = prevPolyCoeff.at<float>(0,0);
-//		auto b = prevPolyCoeff.at<float>(1,0);
-//		auto c = prevPolyCoeff.at<float>(2,0);
-//		auto d = prevPolyCoeff.at<float>(3,0);
-//		auto e = prevPolyCoeff.at<float>(4,0);
-//
-//		for(int i = 2; i < 10; i++) {
-//			auto x = i * 0.2;
-//			worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
-//		}
-//
-//	}
-//
-//	prevPolyCoeff = dst;
-//
-//	auto a = dst.at<float>(0,0);
-//	auto b = dst.at<float>(1,0);
-//	auto c = dst.at<float>(2,0);
-//	auto d = dst.at<float>(3,0);
-//	auto e = dst.at<float>(4,0);
-//
-//	for(int i = 2; i < 10; i++) {
-//		auto x = i * 0.2;
-//		worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
-//	}
-//
-//	// COMPARE THE POLYNOMS
-//	float sqrdError = 0.f;
-//	for(int i = 0; i < worldPoints.size() / 2; i++) {
-//		auto xDiff = worldPoints.at(i).x - worldPoints.at(i + worldPoints.size()/2).x;
-//		auto yDiff = worldPoints.at(i).y - worldPoints.at(i + worldPoints.size()/2).y;
-//		sqrdError += xDiff*xDiff + yDiff*yDiff;
-//	}
-//
-//	ROS_INFO("Error = %f", sqrt(sqrdError));
-//
-//	image_operator_.worldToWarpedImg(worldPoints, imagePoints);
-//	for(int i = 0; i < imagePoints.size(); i++) {
-////	for(auto p : imagePoints) {
-//		cv::circle(debugImg_, imagePoints.at(i), 5,
-//				(i<8) ? cv::Scalar(0,0,255) : cv::Scalar(0,255),
-//				2, cv::LINE_AA);
-//	}
-//
-//
-//	float x = trajectoryDist;
-//	return cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a);
-//}
-
 ///
 /// \brief LineDetection::findLinesWithHough
 /// Extract Lines from the image using Hough Lines
@@ -946,44 +879,6 @@ void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLin
     for(size_t i = 0; i < worldPoints.size(); i += 2) {
         houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
     }
-
-#if 0
-    // Split lines which are longer than segmentLength (world coordinates)
-    worldPoints.clear();
-    imagePoints.clear();
-    for(auto it = lines.begin(); it != lines.end(); ++it) {
-    	int splitInto = static_cast<int>(it->getWorldLength() / segmentLength_) + 1;
-//    	ROS_INFO_STREAM("Length = " << it->getWorldLength() << " split into " << splitInto);
-
-    	if(splitInto > 1) {
-    		// Build normalized vector
-    		cv::Vec2f dir = it->wP2_ - it->wP1_;
-    		auto length = sqrt(dir[0]*dir[0] + dir[1]*dir[1]);
-    		dir[0] = dir[0] / length;
-    		dir[1] = dir[1] / length;
-
-    		cv::Point2f curPos = it->wP1_;
-    		for(int i = 0; i < (splitInto - 1); i++) {
-    			worldPoints.push_back(curPos);
-    			curPos.x += dir[0] * segmentLength_;
-    			curPos.y += dir[1] * segmentLength_;
-    			worldPoints.push_back(curPos);
-    		}
-    		// This is the last part of the split line
-    		worldPoints.push_back(curPos);
-    		worldPoints.push_back(it->wP2_);
-    	} else {
-    		houghLines.push_back(*it);
-    	}
-    }
-
-    // Build split lines
-    image_operator_.worldToWarpedImg(worldPoints, imagePoints);
-    for(size_t i = 0; i < worldPoints.size(); i += 2) {
-    	houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
-    }
-
-#endif
 }
 
 /*
