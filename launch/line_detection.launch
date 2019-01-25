@@ -7,6 +7,7 @@
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
+    <arg name="line_detection_debug_image_topic" default="/line_detection_debug_image"/>
 
     <!-- forward output to [screen|log] -->
     <arg name="output" default="screen"></arg>
@@ -21,6 +22,7 @@
             <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
             <remap from="driving_line_topic" to="$(arg driving_line_topic)"/>
+            <remap from="debug_image" to="$(arg line_detection_debug_image_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>
@@ -36,6 +38,7 @@
             <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
             <remap from="driving_line_topic" to="$(arg driving_line_topic)"/>
+            <remap from="debug_image" to="$(arg line_detection_debug_image_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
         </node>
     </group>
