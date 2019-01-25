@@ -66,27 +66,8 @@ struct Segment {
     };
 };
 
-struct DrivingLane {
-	ros::Time stamp;
-	float detectionRange;
-	Polynom poly;
-
-	DrivingLane()
-	: detectionRange(0.f)
-	{
-	}
-
-	DrivingLane(Polynom &p, float pointXRange, ros::Time &timestamp)
-	: poly(p)
-	, detectionRange(pointXRange)
-	, stamp(timestamp)
-	{
-	}
-};
-
 class RoadModel {
 	tf::TransformListener *pTfListener;
-	DrivingLane dl;
 
     Polynom currentDrivingLinePoly;
 	int defaultPolyOrder = 2;
@@ -104,15 +85,9 @@ public:
 
     std::vector<Segment> segmentsToDl; // TODO: make private again
 
-    DrivingLane getDrivingLine() { return dl; }
-
     inline void setLaneWidth(float w) { laneWidth = w; }
     inline void setDefaultPolyOrder(int o) { defaultPolyOrder = o; }
     inline void setMaxPolyErrorThresh(float t) { maxPolyError = t; }
-
-    // Segment based
-    bool addSegments(std::vector<Segment> &newSegments, ros::Time timestamp);
-    void getSegmentSearchStart(cv::Point2f &posWorld, float &angle) const;
 
     void getSegmentPositions(std::vector<cv::Point2f> &positions, std::vector<float> &angles, ros::Time stamp);
     void updateSegmentAtIndex(Segment &seg, int index);

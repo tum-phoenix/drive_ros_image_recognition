@@ -178,7 +178,6 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     int numSegmentsToUse = maxSenseRange_ / segmentLength_;
     bool useRoadModelSegment = true;
     roadModel.getSegmentPositions(segmentStarts, segmentAngles, imgTimestamp);
-    roadModel.getSegmentSearchStart(segStartWorld, segAngle);
 
     for(int i = 0; i < numSegmentsToUse; i++) {
     	// clear the marking vectors. Otherwise the old ones stay in there.
@@ -837,79 +836,6 @@ bool LineDetection::findIntersection(Segment &resultingSegment, float segmentAng
 	return foundIntersection;
 }
 
-//cv::Point2f LineDetection::findTrajectoryPoint(std::vector<tf::Stamped<tf::Point>> &drivingLine) {
-//	if(drivingLine.empty()) {
-//		return cv::Point2f(1.f, 0.f);
-//	}
-//
-//	// TEST POLYFIT
-//	int order = 4;
-//	cv::Mat srcX(drivingLine.size(), 1, CV_32FC1);
-//	cv::Mat srcY(drivingLine.size(), 1, CV_32FC1);
-//	cv::Mat dst(order+1, 1, CV_32FC1);
-//
-//	for(int i = 0; i < drivingLine.size(); i++) {
-//		srcX.at<float>(i, 0) = drivingLine.at(i).x();
-//		srcY.at<float>(i, 0) = drivingLine.at(i).y();
-//	}
-//
-////	ROS_INFO_STREAM("srcX dims = " << srcX.size << "; srcY dims = " << srcY.size << "; dst dims = " << dst.size);
-//	polyfit(srcX, srcY, dst, order);
-////	ROS_INFO_STREAM("PolyFit = " << dst);
-//
-//	std::vector<cv::Point2f> imagePoints, worldPoints;
-//
-//	ROS_INFO("----------------------------");
-//	if(prevPolyCoeff.rows == (order+1)) {
-//		auto a = prevPolyCoeff.at<float>(0,0);
-//		auto b = prevPolyCoeff.at<float>(1,0);
-//		auto c = prevPolyCoeff.at<float>(2,0);
-//		auto d = prevPolyCoeff.at<float>(3,0);
-//		auto e = prevPolyCoeff.at<float>(4,0);
-//
-//		for(int i = 2; i < 10; i++) {
-//			auto x = i * 0.2;
-//			worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
-//		}
-//
-//	}
-//
-//	prevPolyCoeff = dst;
-//
-//	auto a = dst.at<float>(0,0);
-//	auto b = dst.at<float>(1,0);
-//	auto c = dst.at<float>(2,0);
-//	auto d = dst.at<float>(3,0);
-//	auto e = dst.at<float>(4,0);
-//
-//	for(int i = 2; i < 10; i++) {
-//		auto x = i * 0.2;
-//		worldPoints.push_back(cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a));
-//	}
-//
-//	// COMPARE THE POLYNOMS
-//	float sqrdError = 0.f;
-//	for(int i = 0; i < worldPoints.size() / 2; i++) {
-//		auto xDiff = worldPoints.at(i).x - worldPoints.at(i + worldPoints.size()/2).x;
-//		auto yDiff = worldPoints.at(i).y - worldPoints.at(i + worldPoints.size()/2).y;
-//		sqrdError += xDiff*xDiff + yDiff*yDiff;
-//	}
-//
-//	ROS_INFO("Error = %f", sqrt(sqrdError));
-//
-//	image_operator_.worldToWarpedImg(worldPoints, imagePoints);
-//	for(int i = 0; i < imagePoints.size(); i++) {
-////	for(auto p : imagePoints) {
-//		cv::circle(debugImg_, imagePoints.at(i), 5,
-//				(i<8) ? cv::Scalar(0,0,255) : cv::Scalar(0,255),
-//				2, cv::LINE_AA);
-//	}
-//
-//
-//	float x = trajectoryDist;
-//	return cv::Point2f(x, e*x*x*x*x + d*x*x*x + c*x*x + b*x + a);
-//}
-
 ///
 /// \brief LineDetection::findLinesWithHough
 /// Extract Lines from the image using Hough Lines
@@ -950,44 +876,6 @@ void LineDetection::findLinesWithHough(cv::Mat &img, std::vector<Line> &houghLin
     for(size_t i = 0; i < worldPoints.size(); i += 2) {
         houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
     }
-
-#if 0
-    // Split lines which are longer than segmentLength (world coordinates)
-    worldPoints.clear();
-    imagePoints.clear();
-    for(auto it = lines.begin(); it != lines.end(); ++it) {
-    	int splitInto = static_cast<int>(it->getWorldLength() / segmentLength_) + 1;
-//    	ROS_INFO_STREAM("Length = " << it->getWorldLength() << " split into " << splitInto);
-
-    	if(splitInto > 1) {
-    		// Build normalized vector
-    		cv::Vec2f dir = it->wP2_ - it->wP1_;
-    		auto length = sqrt(dir[0]*dir[0] + dir[1]*dir[1]);
-    		dir[0] = dir[0] / length;
-    		dir[1] = dir[1] / length;
-
-    		cv::Point2f curPos = it->wP1_;
-    		for(int i = 0; i < (splitInto - 1); i++) {
-    			worldPoints.push_back(curPos);
-    			curPos.x += dir[0] * segmentLength_;
-    			curPos.y += dir[1] * segmentLength_;
-    			worldPoints.push_back(curPos);
-    		}
-    		// This is the last part of the split line
-    		worldPoints.push_back(curPos);
-    		worldPoints.push_back(it->wP2_);
-    	} else {
-    		houghLines.push_back(*it);
-    	}
-    }
-
-    // Build split lines
-    image_operator_.worldToWarpedImg(worldPoints, imagePoints);
-    for(size_t i = 0; i < worldPoints.size(); i += 2) {
-    	houghLines.push_back(Line(imagePoints.at(i), imagePoints.at(i + 1), worldPoints.at(i), worldPoints.at(i + 1)));
-    }
-
-#endif
 }
 
 /*
