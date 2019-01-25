@@ -547,24 +547,27 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 
     // 4) Collect points from every lane marking
     std::function<bool (Line*)> inlierFunc = [this, bestAngle, bestLine](Line *l) {
-    	if(fabsf(l->getAngle() - bestAngle) < (5.f / 180.f * M_PI)) {
-    		// angle diff should be < 3 [degree]
-    		float distanceToLine = distanceBetweenLines(*l, *bestLine);
-
-    		if(distanceToLine < laneVar_) {
-    			return true;
-    		}
-
-    		if(fabsf(distanceToLine - laneWidthWorld_) < laneVar_) {
-    			return true;
-    		}
-
-    		if(fabsf(distanceToLine - 2*laneWidthWorld_) < laneVar_) {
-    			return true;
-    		}
-
+    	if(fabsf(l->getAngle() - bestAngle) > (5.f / 180.f * M_PI)) {
+    		// angle diff should be < 5 [degree]
     		return false;
     	}
+
+    	float distanceToLine = distanceBetweenLines(*l, *bestLine);
+
+    	if(distanceToLine < laneVar_) {
+    		return true;
+    	}
+
+    	if(fabsf(distanceToLine - laneWidthWorld_) < laneVar_) {
+    		return true;
+    	}
+
+    	if(fabsf(distanceToLine - 2*laneWidthWorld_) < (2*laneVar_)) {
+    		return true;
+    	}
+
+    	return false;
+
     };
 
     std::vector<cv::Point2f> leftInlierPtsWorld, midInlierPtsWorld, rightInlierPtsWorld;
@@ -593,9 +596,9 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	}
     }
 
-//    ROS_INFO("Left inliers: %lu", leftInlierPtsWorld.size() / 2);
-//    ROS_INFO("Mid inliers: %lu", midInlierPtsWorld.size() / 2);
-//    ROS_INFO("Right inliers: %lu", rightInlierPtsWorld.size() / 2);
+    ROS_INFO("  Left inliers: %lu out of %lu", leftInlierPtsWorld.size() / 2, leftMarkings.size());
+    ROS_INFO("  Mid inliers: %lu out of %lu", midInlierPtsWorld.size() / 2, midMarkings.size());
+    ROS_INFO("  Right inliers: %lu out of %lu", rightInlierPtsWorld.size() / 2, rightMarkings.size());
 
     // 5) Fit polynom in each line
     int lanePosFrom = 0; // DEBUG
