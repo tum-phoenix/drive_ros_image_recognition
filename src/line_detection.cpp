@@ -43,9 +43,14 @@ bool LineDetection::init() {
     // dynamic reconfigure
     dsrv_server_.setCallback(dsrv_cb_);
 
-    //subscribe to camera image
+    //subscribe to homographied image
     imageSubscriber_ = imageTransport_.subscribe("img_in", 3, &LineDetection::imageCallback, this);
     ROS_INFO_STREAM("Subscribed image transport to topic " << imageSubscriber_.getTopic());
+
+    //subscribe to camera image
+    homographiedImageSubscriber_ = imageTransport_.subscribe("homographied_img_in", 3,
+                                                             &LineDetection::homographiedImageCallback, this);
+    ROS_INFO_STREAM("Subscribed homographied image transport to topic " << homographiedImageSubscriber_.getTopic());
 
     odometrySub = pnh_.subscribe("odom_topic", 3, &LineDetection::odometryCallback, this);
     ROS_INFO("Subscribing to odometry on topic '%s'", odometrySub.getTopic().c_str());
@@ -83,6 +88,15 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
         ROS_WARN("Homographing image failed");
         return;
     }
+    processIncomingImage(homographedImg);
+}
+
+void LineDetection::homographiedImageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
+    CvImagePtr currentImage = convertImageMessage(imgIn);
+    processIncomingImage(*currentImage);
+}
+
+void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     imgHeight_ = homographedImg.rows;
     imgWidth_ = homographedImg.cols;
 //    imgTimestamp = imgIn->header.stamp;
@@ -97,8 +111,8 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     findLinesWithHough(homographedImg, linesInImage);
 
     if(linesInImage.empty()) {
-    	ROS_ERROR("No Hough lines found");
-    	return;
+        ROS_ERROR("No Hough lines found");
+        return;
     }
 
 #ifdef PUBLISH_DEBUG
@@ -129,7 +143,7 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     drivingLineMsg.polynom_order = drivingLinePoly.getOrder();
 
     for(auto c : drivingLinePoly.getCoeffs()) {
-    	drivingLineMsg.polynom_params.push_back(c);
+        drivingLineMsg.polynom_params.push_back(c);
     }
 
     drivingLinePub.publish(drivingLineMsg);
@@ -138,14 +152,14 @@ void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     std::vector<cv::Point2f> worldPts, imgPts;
 
     for(float x = 0.f; x < detectionRange; x += .2f) {
-    	worldPts.push_back(cv::Point2f(x, drivingLinePoly.atX(x)));
+        worldPts.push_back(cv::Point2f(x, drivingLinePoly.atX(x)));
     }
     worldPts.push_back(cv::Point2f(detectionRange, drivingLinePoly.atX(detectionRange)));
 
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
     for(int i = 1; i < imgPts.size(); i++) {
-    	cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), cv::Scalar(0,255), 2, cv::LINE_AA);
+        cv::line(debugImg_, imgPts.at(i-1), imgPts.at(i), cv::Scalar(0,255), 2, cv::LINE_AA);
     }
     debugImgPub_.publish(cv_bridge::CvImage(std_msgs::Header(), sensor_msgs::image_encodings::RGB8, debugImg_).toImageMsg());
 #endif

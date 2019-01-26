@@ -24,7 +24,7 @@
     </include>
 
     <include file="$(find drive_ros_image_recognition)/launch/line_detection.launch">
-        <arg name="incoming_image" value="$(arg warped_image_topic)"/>
+        <arg name="incoming_homographied_image" value="$(arg warped_image_topic)"/>
         <arg name="camera_info" value="$(arg camera_info_topic)"/>
         <arg name="homography_topic" value="$(arg homography_topic)"/>
         <arg name="odometry_topic" value="$(arg odometry_topic)"/>

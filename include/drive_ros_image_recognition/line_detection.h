@@ -53,6 +53,7 @@ private:
   // communication
   image_transport::ImageTransport imageTransport_;
   image_transport::Subscriber imageSubscriber_;
+  image_transport::Subscriber homographiedImageSubscriber_;
   ros::Subscriber homography_params_sub_;
   ros::Subscriber odometrySub;
   ros::Publisher drivingLinePub;
@@ -79,6 +80,8 @@ private:
 
   // callbacks
   void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
+  void homographiedImageCallback(const sensor_msgs::ImageConstPtr &imgIn);
+  void processIncomingImage(cv::Mat &homographedImg);
   void odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg);
   void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
   dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
