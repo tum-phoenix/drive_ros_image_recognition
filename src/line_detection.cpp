@@ -237,7 +237,10 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         }
     }
 
-    image_operator_.worldToWarpedImg(worldPts, imgPts);
+    if (worldPts.size() > 0)
+        image_operator_.worldToWarpedImg(worldPts, imgPts);
+    else
+        ROS_WARN_STREAM("[Line Detection] Not segment points found in image!");
 
     ROS_INFO("imgPts: %lu, colors: %lu", imgPts.size(), colors.size());
     for(int i = 0; i < imgPts.size(); i++) {
