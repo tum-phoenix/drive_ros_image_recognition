@@ -35,7 +35,6 @@
 
         <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="$(arg manager_used)"  args="manager" output="$(arg output)"/>
         <node pkg="nodelet" type="nodelet" name="street_crossing_detection_nodelet" args="load drive_ros_image_recognition/RoadDetectionNodelet $(arg manager_used)" output="$(arg output)" launch-prefix="$(arg launch-prefix)">
-            <remap from="img_in" to="$(arg incoming_image)"/>
             <remap from="homographied_img_in" to="$(arg incoming_homographied_image)"/>
             <remap from="camera_info" to="$(arg camera_info)"/>
             <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
