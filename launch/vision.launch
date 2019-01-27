@@ -11,6 +11,7 @@
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
     <arg name="line_detection_debug_image_topic" default="/line_detection_debug_image"/>
+    <arg name="output" default="screen"/>
 
     <include file="$(find drive_ros_image_recognition)/launch/warp_image.launch">
         <arg name="camera_image_topic" value="$(arg camera_image_topic)"/>
@@ -21,6 +22,7 @@
         <arg name="debug" value="$(arg debug)"/>
         <arg name="use_nodelet" value="$(arg use_nodelet)"/>
         <arg name="nodelet_manager" value="$(arg nodelet_manager)"/>
+        <arg name="output" value="$(arg output)"/>
     </include>
 
     <include file="$(find drive_ros_image_recognition)/launch/line_detection.launch">
@@ -33,5 +35,6 @@
         <arg name="use_nodelet" value="$(arg use_nodelet)"/>
         <arg name="nodelet_manager" value="$(arg nodelet_manager)"/>
         <arg name="line_detection_debug_image_topic" default="$(arg line_detection_debug_image_topic)"/>
+        <arg name="output" value="$(arg output)"/>
     </include>
 </launch>

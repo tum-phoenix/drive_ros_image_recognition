@@ -11,7 +11,7 @@
     <arg name="line_detection_debug_image_topic" default="/line_detection_debug_image"/>
 
     <!-- forward output to [screen|log] -->
-    <arg name="output" default="screen"></arg>
+    <arg name="output" default="screen"/>
 
     <arg if="$(arg debug)" name="launch-prefix" value="gdb -ex run --args"/>
     <arg unless="$(arg debug)" name="launch-prefix" value=""/>
