@@ -23,8 +23,7 @@ bool transformOdomToRearAxis(
 bool transformOdomPointsToRearAxis(
 		tf::TransformListener *pTfListener,
 		std::vector<tf::Stamped<tf::Point>> &odomPts,
-		std::vector<tf::Stamped<tf::Point>> &rearAxisPts,
-		ros::Time stamp)
+    std::vector<tf::Stamped<tf::Point>> &rearAxisPts)
 {
 
 	rearAxisPts.resize(odomPts.size());
@@ -66,8 +65,7 @@ bool transformRearAxisToOdom(
 bool transformRearAxisPointsToOdom(
 		tf::TransformListener *pTfListener,
 		std::vector<cv::Point2f> &rearAxisPts,
-		std::vector<tf::Stamped<tf::Point>> &odomPts,
-		ros::Time stamp)
+    std::vector<tf::Stamped<tf::Point>> &odomPts)
 {
 	odomPts.resize(rearAxisPts.size());
 
@@ -108,7 +106,7 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		}
 	}
 
-	transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts, stamp);
+  transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts);
 
 	positions.clear();
 	angles.clear();
@@ -146,12 +144,29 @@ void RoadModel::setOdomPointsForSegments() {
 		rearAxisPts.clear();
 		odomPts.clear();
 
-		rearAxisPts.push_back(segmentsToDl.at(i).positionWorld);
-		rearAxisPts.push_back(segmentsToDl.at(i).endPositionWorld);
+    rearAxisPts.push_back(segmentsToDl.at(i).positionWorld); // idx 0
+    rearAxisPts.push_back(segmentsToDl.at(i).endPositionWorld); // idx 1
+    if(segmentsToDl.at(i).leftLineSet) {
+      rearAxisPts.push_back(segmentsToDl.at(i).leftLineStart); // idx 2
+      rearAxisPts.push_back(segmentsToDl.at(i).leftLineEnd); // idx 3
+    }
+    if(segmentsToDl.at(i).rightLineSet) {
+      rearAxisPts.push_back(segmentsToDl.at(i).rightLineStart); // idx 4
+      rearAxisPts.push_back(segmentsToDl.at(i).rightLineEnd); // idx 5
+    }
 
-		if(transformRearAxisPointsToOdom(pTfListener, rearAxisPts, odomPts, segmentsToDl.at(i).creationTimestamp)) {
-			segmentsToDl.at(i).odomStart = odomPts.at(0);
-			segmentsToDl.at(i).odomEnd = odomPts.at(1);
+    if(transformRearAxisPointsToOdom(pTfListener, rearAxisPts, odomPts)) {
+      size_t odomIdx = 0;
+      segmentsToDl.at(i).odomStart = odomPts.at(odomIdx++);
+      segmentsToDl.at(i).odomEnd = odomPts.at(odomIdx++);
+      if(segmentsToDl.at(i).leftLineSet) {
+        segmentsToDl.at(i).odomLeftLineStart = odomPts.at(odomIdx++);
+        segmentsToDl.at(i).odomLeftLineEnd = odomPts.at(odomIdx++);
+      }
+      if(segmentsToDl.at(i).rightLineSet) {
+        segmentsToDl.at(i).odomRightLineStart = odomPts.at(odomIdx++);
+        segmentsToDl.at(i).odomRightLineEnd = odomPts.at(odomIdx++);
+      }
 			segmentsToDl.at(i).creationTimestamp = odomPts.at(0).stamp_;
 			segmentsToDl.at(i).odomPointsSet = true;
 		}
@@ -219,20 +234,66 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index) {
 	return true;
 }
 
-Polynom RoadModel::getDrivingLinePts(float &detectionRange) {
-	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
+bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
+  std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
 
+  // 1) Convert the odom pointst to rear_axis_middle_ground
+  for(auto s : segmentsToDl) {
+    if(s.odomPointsSet) {
+      if(s.ttl > 0) {
+        if(leftLine && s.leftLineSet) {
+          odomPts.push_back(s.odomLeftLineStart);
+          odomPts.push_back(s.odomLeftLineEnd);
+        }
+        if(!leftLine && s.rightLineSet) {
+          odomPts.push_back(s.odomRightLineStart);
+          odomPts.push_back(s.odomRightLineEnd);
+        }
+      } else {
+        break;
+      }
+    } else {
+      ROS_WARN("odom pts not set");
+    }
+  }
+
+  if(odomPts.empty()) {
+    return false;
+  }
+  transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts);
+
+  // 2) Collect points for the polynoms
+  std::vector<cv::Point2f> linePts;
+
+  for(auto p : rearAxisPts) {
+    linePts.push_back(cv::Point2f(p.x(), p.y()));
+  }
+
+  if(linePts.empty()) {
+    return false;
+  }
+
+  // 3) Build the polynom
+  int polyOrder = (linePts.size() > 2) ? defaultPolyOrder : 1;
+  line = Polynom(polyOrder, linePts);
+
+  return true;
+}
+
+float RoadModel::getDrivingLine(Polynom &drivingLine) {
+  std::vector<tf::Stamped<tf::Point>> odomMidPts, rearAxisMidPts;
+
+  // 1) Convert the odom pointst to rear_axis_middle_ground
 	for(auto s : segmentsToDl) {
 		if(s.odomPointsSet) {
 			ROS_INFO("  Segment.ttl: %i", s.ttl);
 			if(s.ttl > 0) {
-				odomPts.push_back(s.odomStart);
+        odomMidPts.push_back(s.odomStart);
 				// Add a point in the middle of the segment
 				auto odomMid = s.odomStart;
 				odomMid.setX(odomMid.x() + .5f * (s.odomEnd.x() - s.odomStart.x()));
 				odomMid.setY(odomMid.y() + .5f * (s.odomEnd.y() - s.odomStart.y()));
-				odomPts.push_back(odomMid);
-//				odomPts.push_back(s.odomEnd);
+        odomMidPts.push_back(odomMid);
 			} else {
 				break;
 			}
@@ -241,25 +302,28 @@ Polynom RoadModel::getDrivingLinePts(float &detectionRange) {
 		}
 	}
 
-    transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts, ros::Time(0)); // TODO: time not used anymore
+  transformOdomPointsToRearAxis(pTfListener, odomMidPts, rearAxisMidPts);
 
-	std::vector<cv::Point2f> drivingLinePts;
+  // 2) Collect points for the polynoms
+  std::vector<cv::Point2f> drivingLinePts;
+   // we always add a point in front of the vehicle
 	drivingLinePts.push_back(cv::Point2f(.3f, 0.f));
-	for(auto sp : rearAxisPts) {
+  for(auto sp : rearAxisMidPts) {
 		drivingLinePts.push_back(cv::Point2f(sp.x(), sp.y()));
-	}
+  }
 
-	ROS_INFO("Built polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
+  ROS_INFO("Built driving line polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
 
-    if(drivingLinePts.size() < 2) { // we always add a point in front of the vehicle
-		// return a straight line
-//        drivingLinePts.push_back(cv::Point2f(.3f, 0.f));
-		drivingLinePts.push_back(cv::Point(.6, 0.f));
-	}
-    detectionRange = drivingLinePts.back().x;
-	int polyOrder = (drivingLinePts.size() > 2) ? defaultPolyOrder : 1;
-    currentDrivingLinePoly = Polynom(polyOrder, drivingLinePts);
-    return currentDrivingLinePoly;
+  if(drivingLinePts.size() < 2) {
+    // return a straight line
+    drivingLinePts.push_back(cv::Point(.6, 0.f));
+  }
+
+  // 3) Build the polynom
+  int polyOrder = (drivingLinePts.size() > 2) ? defaultPolyOrder : 1;
+  drivingLine = Polynom(polyOrder, drivingLinePts);
+
+  return drivingLinePts.back().x;
 }
 
 void RoadModel::decreaseAllSegmentTtl() {

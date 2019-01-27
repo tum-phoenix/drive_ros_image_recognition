@@ -7,8 +7,6 @@
 #include "drive_ros_image_recognition/line.h"
 #include "drive_ros_image_recognition/common_image_operations.h"
 
-#define PREDICTION_LENGTH   1.0
-
 namespace drive_ros_image_recognition {
 
 enum SegmentType {
@@ -18,19 +16,18 @@ enum SegmentType {
 bool transformOdomPointsToRearAxis(
 		tf::TransformListener *pTfListener,
 		std::vector<tf::Stamped<tf::Point>> &odomPts,
-		std::vector<tf::Stamped<tf::Point>> &rearAxisPts,
-		ros::Time stamp);
+    std::vector<tf::Stamped<tf::Point>> &rearAxisPts);
 
 bool transformRearAxisPointsToOdom(
 		tf::TransformListener *pTfListener,
 		std::vector<cv::Point2f> &rearAxisPts,
-		std::vector<tf::Stamped<tf::Point>> &odomPts,
-		ros::Time stamp);
+    std::vector<tf::Stamped<tf::Point>> &odomPts);
 
 struct Segment {
     cv::Point2f positionWorld;
     cv::Point2f positionImage;
     cv::Point2f endPositionWorld, endPositionImage;
+    cv::Point2f leftLineStart, leftLineEnd, rightLineStart, rightLineEnd;
     cv::Point2f leftPosW, midPosW, rightPosW; // These points lay on the left/mid/right line marking
     cv::Point2f leftPosI, midPosI, rightPosI;
     float angleDiff; // The angle difference to the previous segment
@@ -39,9 +36,12 @@ struct Segment {
     float probablity; // The probability of this segment
     SegmentType segmentType = SegmentType::NORMAL_ROAD;
     int ttl = 4;
+    bool leftLineSet = false, rightLineSet = false;
 
     // Values for use with odometry
     tf::Stamped<tf::Point> odomPosition, odomStart, odomEnd;
+    tf::Stamped<tf::Point> odomLeftLineStart, odomLeftLineEnd;
+    tf::Stamped<tf::Point> odomRightLineStart, odomRightLineEnd;
     ros::Time creationTimestamp;
     bool odomPointsSet = false;
 
@@ -63,7 +63,7 @@ struct Segment {
     inline bool isIntersection() const { return
     		segmentType == SegmentType::INTERSECTION_GO_STRAIGHT ||
 			segmentType == SegmentType::INTERSECTION_STOP;
-    };
+    }
 };
 
 class RoadModel {
@@ -95,10 +95,9 @@ public:
     void decreaseAllSegmentTtl();
     void decreaseSegmentTtl(int index);
 
-    // TODO: is this check necessary here? or already done in line_detection?
     bool segmentFitsToPrevious(Segment *segmentToAdd, int index);
-    // TODO: maybe add parameters for range
-    Polynom getDrivingLinePts(float &detectionRange);
+    float getDrivingLine(Polynom &drivingLine);
+    bool getLaneMarkings(Polynom &line, bool leftLine);
 };
 
 } // namespace drive_ros_image_recognition
