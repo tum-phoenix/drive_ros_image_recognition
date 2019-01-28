@@ -44,10 +44,6 @@ bool LineDetection::init() {
     dsrv_server_.setCallback(dsrv_cb_);
 
     //subscribe to homographied image
-    imageSubscriber_ = imageTransport_.subscribe("img_in", 3, &LineDetection::imageCallback, this);
-    ROS_INFO_STREAM("Subscribed image transport to topic " << imageSubscriber_.getTopic());
-
-    //subscribe to camera image
     homographiedImageSubscriber_ = imageTransport_.subscribe("homographied_img_in", 3,
                                                              &LineDetection::homographiedImageCallback, this);
     ROS_INFO_STREAM("Subscribed homographied image transport to topic " << homographiedImageSubscriber_.getTopic());
@@ -74,21 +70,6 @@ bool LineDetection::init() {
 
 void LineDetection::odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg) {
 	latestOdometry = *odomMsg;
-}
-
-///
-/// \brief LineDetection::imageCallback
-/// Called for incoming camera image. Extracts the image from the incoming message.
-/// \param imgIn the incoming camera image message.
-///
-void LineDetection::imageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
-    auto currentImage = convertImageMessage(imgIn);
-    cv::Mat homographedImg;
-    if(!image_operator_.homographImage(*currentImage, homographedImg)) {
-        ROS_WARN("Homographing image failed");
-        return;
-    }
-    processIncomingImage(homographedImg);
 }
 
 void LineDetection::homographiedImageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
@@ -209,9 +190,10 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     float segAngle = 0.f;
     float totalSegLength = 0.f;
     std::vector<Line*> unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings;
+    std::vector<Line*> allLeftMarkings, allMidMarkings, allRightMarkings;
     std::vector<cv::RotatedRect> regions;
 
-    ROS_INFO("------------- New image ------------------");
+    ROS_INFO("=============== New image ===============");
 
     for(int i = 0; i < lines.size(); i++) {
     	unusedLines.push_back(&(lines.at(i)));
@@ -233,7 +215,7 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     	rightMarkings.clear();
     	otherMarkings.clear();
 
-    	ROS_INFO("Segment #%u", i+1);
+    	ROS_INFO("--- Segment #%u ---", i+1);
 
     	// If we did not find a segment at the previous position use one from the road model
     	if(useRoadModelSegment) {
@@ -244,26 +226,100 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     	}
 
         regions = buildRegions(segStartWorld, segAngle);
-        assignLinesToRegions(&regions, unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings);
+        assignLinesToRegions(&regions, segAngle, unusedLines, leftMarkings, midMarkings, rightMarkings, otherMarkings);
+
+#if 0
+        // DEBUG: draw the assigned lines
+        cv::Mat testImg = debugImg_.clone();
+        // first draw the regions
+        for(auto r : regions) {
+        	cv::Point2f edges[4];
+        	r.points(edges);
+
+        	for(int i = 0; i < 4; i++)
+        		cv::line(testImg, edges[i], edges[(i+1)%4], cv::Scalar(255));
+        }
+        // draw the inliers
+        std::function<void (std::vector<Line*>&, cv::Scalar)> drawLines =
+        		[testImg](std::vector<Line*> &lines, cv::Scalar color) {
+        	for(auto l : lines) {
+        		cv::line(testImg, l->iP1_, l->iP2_, color, 2, cv::LINE_AA);
+        	}
+        };
+
+        drawLines(leftMarkings, cv::Scalar(0,255));
+        drawLines(midMarkings, cv::Scalar(0,255));
+        drawLines(rightMarkings, cv::Scalar(0,255));
+        drawLines(otherMarkings, cv::Scalar(0,0,255));
+
+        std::string windowName("Assigned lines");
+        cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE | cv::WINDOW_KEEPRATIO);
+        cv::imshow(windowName, testImg);
+        cv::waitKey(0);
+#endif
+
+        // DEBUG
+        float probMidDashed = isDashedLine(midMarkings);
+        float probLeftDashed = isDashedLine(leftMarkings);
+        float probRightDashed = isDashedLine(rightMarkings);
+        if((probMidDashed < probLeftDashed) || (probMidDashed < probRightDashed)) {
+        	if(probMidDashed < 0.5f) {
+        		ROS_WARN("  mid line is not dashed: %.2f", isDashedLine(midMarkings));
+        		if(probRightDashed > 0.7f) {
+        			ROS_INFO("  right line is probably the middle line: %.2f", isDashedLine(rightMarkings));
+
+        			cv::Vec2f shiftVec(	sin(segAngle) * laneWidthWorld_,
+        					cos(segAngle) * laneWidthWorld_ * -1.f);
+
+        			useRoadModelSegment = false;
+        			i--; // redo this segment
+        			segStartWorld.x += shiftVec(0);
+        			segStartWorld.y += shiftVec(1);
+        			continue;
+        		}
+
+        		if(probLeftDashed > 0.7f) {
+        			ROS_INFO("  left line is probably the middle line: %.2f", isDashedLine(leftMarkings));
+
+        			cv::Vec2f shiftVec(	sin(segAngle) * laneWidthWorld_,
+        					cos(segAngle) * laneWidthWorld_);
+
+        			useRoadModelSegment = false;
+        			i--; // redo this segment
+        			segStartWorld.x += shiftVec(0);
+        			segStartWorld.y += shiftVec(1);
+        			continue;
+        		}
+        	}
+        }
+
+        // Find the street segment with RANSAC
         auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle);
 
-        // If this is the first segment we can use nullptr as argument for previousSegment
-        if(roadModel.segmentFitsToPrevious(&seg, i))
-        {
+        // Check if the found segment fits with the previous one
+        if(roadModel.segmentFitsToPrevious(&seg, i)) {
         	seg.creationTimestamp = imgTimestamp;
         	roadModel.updateSegmentAtIndex(seg, i);
 
         	segAngle = seg.angleTotal; // the current angle of the lane
         	totalSegLength += seg.length;
-          segStartWorld = seg.endPositionWorld;
-          useRoadModelSegment = false;
+        	segStartWorld = seg.endPositionWorld;
+        	useRoadModelSegment = false;
+
+        	allLeftMarkings.insert(allLeftMarkings.end(), leftMarkings.begin(), leftMarkings.end());
+        	allMidMarkings.insert(allMidMarkings.end(), midMarkings.begin(), midMarkings.end());
+        	allRightMarkings.insert(allRightMarkings.end(), rightMarkings.begin(), rightMarkings.end());
         } else {
-        	ROS_INFO("Segment does not fit with previous");
+        	ROS_INFO("  segment does not fit with previous");
         	useRoadModelSegment = true;
         	roadModel.decreaseSegmentTtl(i);
         }
 
     }
+
+    ROS_INFO("  All left markings: %.3f", isDashedLine(allLeftMarkings));
+    ROS_INFO("  All mid markings: %.3f", isDashedLine(allMidMarkings));
+    ROS_INFO("  All right markings: %.3f", isDashedLine(allRightMarkings));
 
     roadModel.setOdomPointsForSegments();
     roadModel.decreaseAllSegmentTtl();
@@ -287,9 +343,8 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     if (worldPts.size() > 0)
         image_operator_.worldToWarpedImg(worldPts, imgPts);
     else
-        ROS_WARN_STREAM("[Line Detection] Not segment points found in image!");
+        ROS_WARN("[Line Detection] No segment points found in image!");
 
-    ROS_INFO("imgPts: %lu, colors: %lu", imgPts.size(), colors.size());
     for(int i = 0; i < imgPts.size(); i++) {
         cv::circle(debugImg_, imgPts.at(i), 10, colors.at(i), 5);
     }
@@ -368,35 +423,31 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
 /// \param regions three regions (left, middle, right)
 /// \param lines the lines which should be assigned to the regions
 ///
-void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, std::vector<Line*> &lines,
+void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, float angle, std::vector<Line*> &lines,
                                          std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
                                          std::vector<Line*> &rightMarkings, std::vector<Line*> &otherMarkings) {
 
-	float orientationAngle = (regions->at(0).angle / 180.f) * M_PI; // the regions angles in [rad]
-	if(orientationAngle > M_PI)
-		ROS_WARN("Orientation angle > PI");
-
     for(auto linesIt = lines.begin(); linesIt != lines.end(); ++linesIt) {
     	// first check if the angle is ok to ignore stop and start lines
-    	if(fabsf(orientationAngle - (*linesIt)->getAngle()) > M_PI_2) {
+    	if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_2) {
     		otherMarkings.push_back(*linesIt);
     	} else {
     		// if angle is ok, test with regions
     		if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
     			leftMarkings.push_back(*linesIt);
-//    			cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
     		} else if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
     			midMarkings.push_back(*linesIt);
-//    			cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 255), 1, cv::LINE_AA);
     		} else if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
     			rightMarkings.push_back(*linesIt);
-//    			cv::line(debugImg_, (*linesIt)->iP1_, (*linesIt)->iP2_, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
     		} else {
     			otherMarkings.push_back(*linesIt);
     		}
     	}
     }
 
+
+
+#if 0
     // TODO: look over the idea of building rects around the lines again
 //    ROS_INFO("---");
     std::vector<cv::Point2f> linePointsWorld;
@@ -437,6 +488,40 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
 //    		rightMarkings.clear();
     	}
     }
+#endif
+}
+
+float LineDetection::isDashedLine(std::vector<Line*> &laneMarkings) {
+	int numNotDashed = 0;
+
+	if(laneMarkings.empty()) {
+		return .51f; // TODO: put lower bound in config1
+	}
+
+	std::sort(laneMarkings.begin(), laneMarkings.end(), [](Line *a, Line *b){ return a->wP1_.x < b->wP1_.x; });
+
+	for(auto i = laneMarkings.begin(); i != laneMarkings.end(); ++i) {
+		// Line should not be longer than 0.2[m]
+		if((*i)->getWorldLength() > 0.21f) {
+			numNotDashed++;
+			continue; // next line for iterator 'i'
+		}
+
+		// There should be no line closer than 0.2[m] to this line's end
+		for(auto j = i + 1; j != laneMarkings.end(); ++j) {
+			if((*i)->wP2_.x < (*j)->wP1_.x) {
+				auto xDist = (*j)->wP1_.x - (*i)->wP2_.x;
+				auto yDist = (*j)->wP1_.y - (*i)->wP2_.y;
+
+				if(sqrtf(xDist*xDist + yDist*yDist) < 0.19f) {
+					numNotDashed++;
+					break; // continue with next 'i' since we already found a line closer than the threshold
+				}
+			}
+		}
+	}
+
+	return 1.f - (float(numNotDashed) / float(laneMarkings.size()));
 }
 
 ///
@@ -464,7 +549,8 @@ bool LineDetection::lineIsInRegion(Line *line, const cv::RotatedRect *region, bo
             auto lineRect = cv::minAreaRect(pts);
             lineRect.size.height += 1;
             lineRect.size.width += 1;
-//            ROS_INFO_STREAM("Points " << line->iP1_ << " and " << line->iP2_ << " give Rect at " << lineRect.center << " with size " << lineRect.size);
+//            ROS_INFO_STREAM("Points " << line->iP1_ << " and " << line->iP2_ << " give Rect at " <<
+//            		lineRect.center << " with size " << lineRect.size);
             int res = cv::rotatedRectangleIntersection(lineRect, *region, pts);
             if(res == cv::INTERSECT_NONE) {
                 return false;
@@ -525,15 +611,16 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     worldPts.push_back(segStartWorld);
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
+    ROS_INFO("> RANSAC");
+
     if(numLines == 0) {
-        ROS_WARN("No lines for Ransac");
+        ROS_WARN("  no lines for Ransac");
         return Segment(segStartWorld, imgPts.at(0), 0.f, prevAngle, segmentLength_, 0.f);
     }
 
     std::default_random_engine generator;
     std::uniform_int_distribution<int> distribution(0, numLines - 1);
 
-    ROS_INFO("---- RANSAC ----");
 //    ROS_INFO_STREAM("Left markings: " << leftMarkings.size());
 //    ROS_INFO_STREAM("Mid markings: " << midMarkings.size());
 //    ROS_INFO_STREAM("Right markings: " << rightMarkings.size());
@@ -646,9 +733,9 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	}
     }
 
-    ROS_INFO("  Left inliers: %lu out of %lu", leftInlierPtsWorld.size() / 2, leftMarkings.size());
-    ROS_INFO("  Mid inliers: %lu out of %lu", midInlierPtsWorld.size() / 2, midMarkings.size());
-    ROS_INFO("  Right inliers: %lu out of %lu", rightInlierPtsWorld.size() / 2, rightMarkings.size());
+//    ROS_INFO("  Left inliers: %lu out of %lu", leftInlierPtsWorld.size() / 2, leftMarkings.size());
+//    ROS_INFO("  Mid inliers: %lu out of %lu", midInlierPtsWorld.size() / 2, midMarkings.size());
+//    ROS_INFO("  Right inliers: %lu out of %lu", rightInlierPtsWorld.size() / 2, rightMarkings.size());
 
     // 5) Fit polynom in each line
     int lanePosFrom = 0; // DEBUG
@@ -676,9 +763,9 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	// Set lane position
     	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
     	laneMidPt.y -= laneWidthWorld_ * 1.5f;
-      lanePosFrom = 1; // Debug
+    	lanePosFrom = 1; // Debug
 
-      detectedRange += xMax;
+    	detectedRange += xMax;
     	numLaneMarkingsDetected++;
 
       // Set start and end of line
@@ -717,12 +804,12 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	detectedRange += xMax;
     	numLaneMarkingsDetected++;
 
-      // Set start and end of line
-      rightLineFound = true;
-      rightLineStart.x = xMin;
-      rightLineStart.y = poly.atX(xMin);
-      rightLineEnd.x = xMax;
-      rightLineEnd.y = poly.atX(xMax);
+    	// Set start and end of line
+    	rightLineFound = true;
+    	rightLineStart.x = xMin;
+    	rightLineStart.y = poly.atX(xMin);
+    	rightLineEnd.x = xMax;
+    	rightLineEnd.y = poly.atX(xMax);
     }
 
     if(!midInlierPtsWorld.empty()) {
@@ -738,21 +825,25 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     		return a.x < b.x;
     	});
 
-      float xMin = minElem->x;
-      float xMax = maxElem->x;
+    	float xMin = minElem->x;
+    	float xMax = maxElem->x;
 
-      if((xMax - xMin) < 0.1f) {
-        ROS_WARN("mid line length = %.3f", (xMax - xMin));
-      }
+    	if((xMax - xMin) < 0.1f) {
+    		ROS_WARN("mid line length = %.3f", (xMax - xMin));
+    	}
 
-      // Set lane position
-      laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
-      laneMidPt.y -= laneWidthWorld_ * .5f;
-      lanePosFrom = 2;
+    	// Set lane position
+    	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
+    	cv::Vec2f shiftVec(sin(bestAngle) * laneWidthWorld_ *.5f, cos(bestAngle) * laneWidthWorld_ * -.5f);
+    	laneMidPt.x += shiftVec(0);
+    	laneMidPt.y += shiftVec(1);
+    	ROS_INFO("  Shift mid line by (%.2f, %.2f)", shiftVec(0), shiftVec(1));
+    	lanePosFrom = 2;
 
-      detectedRange += xMax;
-      numLaneMarkingsDetected++;
+    	detectedRange += xMax;
+    	numLaneMarkingsDetected++;
     }
+
 
     // 6) Build the segment
     // Calculate the segment end point
@@ -784,13 +875,13 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     s.endPositionWorld = segEndWorld;
     s.leftLineSet = leftLineFound;
     if(leftLineFound) {
-      s.leftLineStart = leftLineStart;
-      s.leftLineEnd = leftLineEnd;
+    	s.leftLineStart = leftLineStart;
+    	s.leftLineEnd = leftLineEnd;
     }
     s.rightLineSet = rightLineFound;
     if(rightLineFound) {
-      s.rightLineStart = rightLineStart;
-      s.rightLineEnd = rightLineEnd;
+    	s.rightLineStart = rightLineStart;
+    	s.rightLineEnd = rightLineEnd;
     }
 
     ROS_INFO("  Lane position built from %s line", ((lanePosFrom == 1) ? "left" : ((lanePosFrom == 2) ? "mid" : "right")));
