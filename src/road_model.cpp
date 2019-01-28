@@ -115,10 +115,6 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		cv::Point2f startPt(rearAxisPts.at(i).x(),   rearAxisPts.at(i).y());
 		cv::Point2f endPt  (rearAxisPts.at(i+1).x(), rearAxisPts.at(i+1).y());
 
-//		ROS_INFO("startPt (%.2f, %.2f)", startPt.x, startPt.y);
-//		ROS_INFO("  endPt (%.2f, %.2f)", endPt.x, endPt.y);
-//		ROS_INFO(" angle = %.2f", atan2(endPt.y - startPt.y, endPt.x - startPt.x));
-
 		if(startPt.x < 0.2f) {
 			ROS_INFO("  remove first point");
 		} else {
@@ -132,7 +128,6 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 }
 
 void RoadModel::setOdomPointsForSegments() {
-	ROS_INFO("setOdomPointsForSegments");
 	std::vector<cv::Point2f> rearAxisPts;
 	std::vector<tf::Stamped<tf::Point>> odomPts;
 
@@ -174,7 +169,7 @@ void RoadModel::setOdomPointsForSegments() {
 }
 
 void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
-	ROS_INFO("updateSegmentAtIndex %u", index);
+	ROS_INFO("  updateSegmentAtIndex %u", index);
 
 	if(index < segmentsToDl.size()) {
 		segmentsToDl.at(index) = seg;
@@ -186,48 +181,50 @@ void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
 }
 
 bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index) {
-	ROS_INFO("segmentFitsToPrevious: segmentsToDl.size() = %lu, index = %u", segmentsToDl.size(), index);
-
     bool isFirstSegment = (index == 0);
 
 	if((!isFirstSegment) && (index > segmentsToDl.size())) {
+		ROS_INFO("  index > segmentsToDl.size()");
 		return false;
 	}
 
 	Segment *previousSegment = (isFirstSegment ? nullptr : &(segmentsToDl.at(index - 1)));
 
 	if(segmentToAdd->probablity < 0.2f) {
-//		ROS_INFO("Segments probability is too low");
+		ROS_INFO("  segments probability is too low");
 		return false;
 	}
 
 	if(segmentToAdd->length < 0.05f) {
+		ROS_INFO("  segment length < 0.05");
 		return false;
 	}
 
 	if(!isFirstSegment) {
 		float angleVar = M_PI / 7.0f; // TODO move to config
 		if(std::abs(previousSegment->angleTotal - segmentToAdd->angleTotal) > angleVar) {
-//			ROS_INFO_STREAM("Too much angle difference: " << (segmentToAdd->angleDiff * 180.f / M_PI) << "[deg]");
+			ROS_INFO_STREAM("  too much angle difference: " << (segmentToAdd->angleDiff * 180.f / M_PI) << "[deg]");
 			return false;
 		}
 	} else {
 		// The first segment should points into the cars driving direction
 		if(std::abs(segmentToAdd->angleTotal) > M_PI / 4.0f) {
-//			ROS_WARN("First segments angle is too big: %.1f[deg]", segmentToAdd->angleTotal * 180.f / M_PI);
+			ROS_WARN("  first segments angle is too big: %.1f[deg]", segmentToAdd->angleTotal * 180.f / M_PI);
 			return false;
 		}
 	}
 
     // Compare to previous polynom
     // TODO: quick hack. think this through
+	if(segmentsToDl.empty()) {
+		return true;
+	}
     float error = .0f;
     error += std::fabs(segmentToAdd->positionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->positionWorld.x));
     error += std::fabs(segmentToAdd->endPositionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->endPositionWorld.x));
 
-    ROS_INFO("  Error based on polynom: %.3f", error);
-
     if(error > maxPolyError) {
+    	ROS_INFO("  error based on polynom: %.3f", error);
         return false;
     }
 
@@ -277,23 +274,27 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
   int polyOrder = (linePts.size() > 2) ? defaultPolyOrder : 1;
   line = Polynom(polyOrder, linePts);
 
+  ROS_INFO("  Built %s line from %lu points with limits [%.2f, %.2f]",
+		  (leftLine ? "left" : "right"), linePts.size(),
+		  std::min_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x,
+		  std::max_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x);
+
   return true;
 }
 
 float RoadModel::getDrivingLine(Polynom &drivingLine) {
-  std::vector<tf::Stamped<tf::Point>> odomMidPts, rearAxisMidPts;
+	std::vector<tf::Stamped<tf::Point>> odomMidPts, rearAxisMidPts;
 
-  // 1) Convert the odom pointst to rear_axis_middle_ground
+	// 1) Convert the odom pointst to rear_axis_middle_ground
 	for(auto s : segmentsToDl) {
 		if(s.odomPointsSet) {
-			ROS_INFO("  Segment.ttl: %i", s.ttl);
 			if(s.ttl > 0) {
-        odomMidPts.push_back(s.odomStart);
+				odomMidPts.push_back(s.odomStart);
 				// Add a point in the middle of the segment
 				auto odomMid = s.odomStart;
 				odomMid.setX(odomMid.x() + .5f * (s.odomEnd.x() - s.odomStart.x()));
 				odomMid.setY(odomMid.y() + .5f * (s.odomEnd.y() - s.odomStart.y()));
-        odomMidPts.push_back(odomMid);
+				odomMidPts.push_back(odomMid);
 			} else {
 				break;
 			}
@@ -302,7 +303,7 @@ float RoadModel::getDrivingLine(Polynom &drivingLine) {
 		}
 	}
 
-  transformOdomPointsToRearAxis(pTfListener, odomMidPts, rearAxisMidPts);
+	transformOdomPointsToRearAxis(pTfListener, odomMidPts, rearAxisMidPts);
 
   // 2) Collect points for the polynoms
   std::vector<cv::Point2f> drivingLinePts;
