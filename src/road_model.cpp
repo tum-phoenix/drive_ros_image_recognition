@@ -99,6 +99,9 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 				odomPts.push_back(s.odomStart);
 				odomPts.push_back(s.odomEnd);
 			} else {
+				if(odomPts.empty()) {
+					ROS_WARN("not using first segment");
+				}
 				break;
 			}
 		} else {
@@ -106,7 +109,7 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		}
 	}
 
-  transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts);
+	transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts);
 
 	positions.clear();
 	angles.clear();
@@ -115,7 +118,7 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		cv::Point2f startPt(rearAxisPts.at(i).x(),   rearAxisPts.at(i).y());
 		cv::Point2f endPt  (rearAxisPts.at(i+1).x(), rearAxisPts.at(i+1).y());
 
-		if(startPt.x < 0.2f) {
+		if(startPt.x < 0.f) {
 			ROS_INFO("  remove first point");
 		} else {
 			positions.push_back(startPt);
@@ -124,6 +127,10 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 	}
 
 	ROS_INFO("getSegmentPositions: Returning %lu positions from %lu segments", positions.size(), odomPts.size() / 2);
+
+	if(!positions.empty()) {
+		ROS_INFO("  first position at (%.2f, %.2f)", positions.begin()->x, positions.begin()->y);
+	}
 
 }
 
@@ -235,15 +242,34 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
   std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
 
   // 1) Convert the odom pointst to rear_axis_middle_ground
+  int segCtr = 0; // DEBUG
   for(auto s : segmentsToDl) {
+	  segCtr++;
     if(s.odomPointsSet) {
+//      ROS_INFO("  laneMarking for Seg #%u on %s side with TTL=%i", segCtr, (leftLine ? "left" : "right"), s.ttl);
+//      if(leftLine)
+//    	  ROS_INFO("    Left line set? %s", (s.leftLineSet ? "yes" : "no"));
+//      else
+//    	  ROS_INFO("    Right line set? %s", (s.rightLineSet ? "yes" : "no"));
       if(s.ttl > 0) {
         if(leftLine && s.leftLineSet) {
           odomPts.push_back(s.odomLeftLineStart);
+
+          auto odomMid = s.odomLeftLineStart;
+          odomMid.setX(odomMid.x() + .5f * (s.odomLeftLineEnd.x() - s.odomLeftLineStart.x()));
+          odomMid.setY(odomMid.y() + .5f * (s.odomLeftLineEnd.y() - s.odomLeftLineStart.y()));
+          odomPts.push_back(odomMid);
+
           odomPts.push_back(s.odomLeftLineEnd);
         }
         if(!leftLine && s.rightLineSet) {
           odomPts.push_back(s.odomRightLineStart);
+
+          auto odomMid = s.odomRightLineStart;
+          odomMid.setX(odomMid.x() + .5f * (s.odomRightLineEnd.x() - s.odomRightLineStart.x()));
+          odomMid.setY(odomMid.y() + .5f * (s.odomRightLineEnd.y() - s.odomRightLineStart.y()));
+          odomPts.push_back(odomMid);
+
           odomPts.push_back(s.odomRightLineEnd);
         }
       } else {
@@ -266,13 +292,12 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
     linePts.push_back(cv::Point2f(p.x(), p.y()));
   }
 
-  if(linePts.empty()) {
+  if(linePts.size() < 4) {
     return false;
   }
 
   // 3) Build the polynom
-  int polyOrder = (linePts.size() > 2) ? defaultPolyOrder : 1;
-  line = Polynom(polyOrder, linePts);
+  line = Polynom(defaultPolyOrder, linePts);
 
   ROS_INFO("  Built %s line from %lu points with limits [%.2f, %.2f]",
 		  (leftLine ? "left" : "right"), linePts.size(),

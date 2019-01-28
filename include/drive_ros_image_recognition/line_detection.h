@@ -105,7 +105,8 @@ private:
   float isDashedLine(std::vector<Line*> &laneMarkings);
   bool lineIsInRegion(Line *line, const cv::RotatedRect *region, bool isImageCoordiante) const;
   bool pointIsInRegion(cv::Point2f *pt, cv::Point2f *edges) const;
-  Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle);
+  Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
+		  std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle, bool isFirstSegment);
   bool findIntersection(Segment &resultingSegment, float segmentAngle, cv::Point2f segStartWorld,
   		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
 

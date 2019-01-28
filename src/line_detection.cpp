@@ -151,7 +151,6 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     drivingLinePub.publish(drivingLineMsg);
 
 #ifdef PUBLISH_DEBUG
-
     std::function<void (Polynom&, cv::Scalar)> drawLaneMarking = [this, detectionRange](Polynom &poly, cv::Scalar color) {
       std::vector<cv::Point2f> worldPts, imgPts;
 
@@ -169,7 +168,7 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
 
     drawLaneMarking(drivingLinePoly, cv::Scalar(0,255));
     if(leftLineFound) {
-      drawLaneMarking(leftLinePoly, cv::Scalar(0,0,255));
+      drawLaneMarking(leftLinePoly, cv::Scalar(255,211,0));
     }
     if(rightLineFound) {
       drawLaneMarking(rightLinePoly, cv::Scalar(0,0,255));
@@ -276,9 +275,7 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         			segStartWorld.x += shiftVec(0);
         			segStartWorld.y += shiftVec(1);
         			continue;
-        		}
-
-        		if(probLeftDashed > 0.7f) {
+        		} else if(probLeftDashed > 0.7f) {
         			ROS_INFO("  left line is probably the middle line: %.2f", isDashedLine(leftMarkings));
 
         			cv::Vec2f shiftVec(	sin(segAngle) * laneWidthWorld_,
@@ -289,12 +286,14 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         			segStartWorld.x += shiftVec(0);
         			segStartWorld.y += shiftVec(1);
         			continue;
+        		} else {
+        			ROS_INFO("!!! Maybe there are markings on the street?");
         		}
         	}
         }
 
         // Find the street segment with RANSAC
-        auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle);
+        auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle, i == 0);
 
         // Check if the found segment fits with the previous one
         if(roadModel.segmentFitsToPrevious(&seg, i)) {
@@ -599,7 +598,7 @@ bool LineDetection::pointIsInRegion(cv::Point2f *pt, cv::Point2f *edges) const {
 Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
                                           std::vector<Line*> &midMarkings,
                                           std::vector<Line*> &rightMarkings,
-                                          cv::Point2f segStartWorld, float prevAngle) {
+                                          cv::Point2f segStartWorld, float prevAngle, bool isFirstSegment) {
     float bestAngle = prevAngle;
     float bestScore = 0.f;
     Line *bestLine;
@@ -758,22 +757,27 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	});
 
     	float xMin = minElem->x;
+    	if(isFirstSegment) {
+    		xMin = std::min(xMin, .3f);
+    	}
     	float xMax = maxElem->x;
 
     	// Set lane position
     	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
-    	laneMidPt.y -= laneWidthWorld_ * 1.5f;
+    	cv::Vec2f shiftVec(sin(bestAngle) * laneWidthWorld_ * 1.5f, cos(bestAngle) * laneWidthWorld_ * -1.5f);
+    	laneMidPt.x += shiftVec(0);
+    	laneMidPt.y += shiftVec(1);
     	lanePosFrom = 1; // Debug
 
     	detectedRange += xMax;
     	numLaneMarkingsDetected++;
 
-      // Set start and end of line
-      leftLineFound = true;
-      leftLineStart.x = xMin;
-      leftLineStart.y = poly.atX(xMin);
-      leftLineEnd.x = xMax;
-      leftLineEnd.y = poly.atX(xMax);
+    	// Set start and end of line
+    	leftLineFound = true;
+    	leftLineStart.x = xMin;
+    	leftLineStart.y = poly.atX(xMin);
+    	leftLineEnd.x = xMax;
+    	leftLineEnd.y = poly.atX(xMax);
     }
 
     if(!rightInlierPtsWorld.empty()) {
@@ -790,15 +794,16 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	});
 
     	float xMin = minElem->x;
-    	float xMax = maxElem->x;
-
-    	if((xMax - xMin) < 0.1f) {
-    		ROS_WARN("right line length = %.3f", (xMax - xMin));
+    	if(isFirstSegment) {
+    		xMin = std::min(xMin, .3f);
     	}
+    	float xMax = maxElem->x;
 
     	// Set lane position
     	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
-    	laneMidPt.y += laneWidthWorld_ * .5f;
+    	cv::Vec2f shiftVec(sin(bestAngle) * laneWidthWorld_ * .5f, cos(bestAngle) * laneWidthWorld_ * .5f);
+    	laneMidPt.x += shiftVec(0);
+    	laneMidPt.y += shiftVec(1);
     	lanePosFrom = 3;
 
     	detectedRange += xMax;
@@ -828,16 +833,11 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	float xMin = minElem->x;
     	float xMax = maxElem->x;
 
-    	if((xMax - xMin) < 0.1f) {
-    		ROS_WARN("mid line length = %.3f", (xMax - xMin));
-    	}
-
     	// Set lane position
     	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
-    	cv::Vec2f shiftVec(sin(bestAngle) * laneWidthWorld_ *.5f, cos(bestAngle) * laneWidthWorld_ * -.5f);
+    	cv::Vec2f shiftVec(sin(bestAngle) * laneWidthWorld_ * .5f, cos(bestAngle) * laneWidthWorld_ * -.5f);
     	laneMidPt.x += shiftVec(0);
     	laneMidPt.y += shiftVec(1);
-    	ROS_INFO("  Shift mid line by (%.2f, %.2f)", shiftVec(0), shiftVec(1));
     	lanePosFrom = 2;
 
     	detectedRange += xMax;
@@ -884,11 +884,7 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	s.rightLineEnd = rightLineEnd;
     }
 
-    ROS_INFO("  Lane position built from %s line", ((lanePosFrom == 1) ? "left" : ((lanePosFrom == 2) ? "mid" : "right")));
-
-//    ROS_INFO("Orig segmentStart: (%.2f, %.2f)", segStartWorld.x, segStartWorld.y);
-//    ROS_INFO("New lane mid: (%.2f, %.2f)", laneMidPt.x, laneMidPt.y);
-//    ROS_INFO("Detected range = %.2f, segment length = %.3f", detectedRange, (detectedRange - segStartWorld.x));
+//    ROS_INFO("  Lane position built from %s line", ((lanePosFrom == 1) ? "left" : ((lanePosFrom == 2) ? "mid" : "right")));
 
     return s;
 }
