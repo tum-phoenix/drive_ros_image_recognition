@@ -65,7 +65,7 @@ bool transformRearAxisToOdom(
 bool transformRearAxisPointsToOdom(
 		tf::TransformListener *pTfListener,
 		std::vector<cv::Point2f> &rearAxisPts,
-    std::vector<tf::Stamped<tf::Point>> &odomPts)
+		std::vector<tf::Stamped<tf::Point>> &odomPts)
 {
 	odomPts.resize(rearAxisPts.size());
 
@@ -146,29 +146,29 @@ void RoadModel::setOdomPointsForSegments() {
 		rearAxisPts.clear();
 		odomPts.clear();
 
-    rearAxisPts.push_back(segmentsToDl.at(i).positionWorld); // idx 0
-    rearAxisPts.push_back(segmentsToDl.at(i).endPositionWorld); // idx 1
-    if(segmentsToDl.at(i).leftLineSet) {
-      rearAxisPts.push_back(segmentsToDl.at(i).leftLineStart); // idx 2
-      rearAxisPts.push_back(segmentsToDl.at(i).leftLineEnd); // idx 3
-    }
-    if(segmentsToDl.at(i).rightLineSet) {
-      rearAxisPts.push_back(segmentsToDl.at(i).rightLineStart); // idx 4
-      rearAxisPts.push_back(segmentsToDl.at(i).rightLineEnd); // idx 5
-    }
+		rearAxisPts.push_back(segmentsToDl.at(i).positionWorld); // idx 0
+		rearAxisPts.push_back(segmentsToDl.at(i).endPositionWorld); // idx 1
+		if(segmentsToDl.at(i).leftLineSet) {
+			rearAxisPts.push_back(segmentsToDl.at(i).leftLineStart); // idx 2
+			rearAxisPts.push_back(segmentsToDl.at(i).leftLineEnd); // idx 3
+		}
+		if(segmentsToDl.at(i).rightLineSet) {
+			rearAxisPts.push_back(segmentsToDl.at(i).rightLineStart); // idx 4
+			rearAxisPts.push_back(segmentsToDl.at(i).rightLineEnd); // idx 5
+		}
 
-    if(transformRearAxisPointsToOdom(pTfListener, rearAxisPts, odomPts)) {
-      size_t odomIdx = 0;
-      segmentsToDl.at(i).odomStart = odomPts.at(odomIdx++);
-      segmentsToDl.at(i).odomEnd = odomPts.at(odomIdx++);
-      if(segmentsToDl.at(i).leftLineSet) {
-        segmentsToDl.at(i).odomLeftLineStart = odomPts.at(odomIdx++);
-        segmentsToDl.at(i).odomLeftLineEnd = odomPts.at(odomIdx++);
-      }
-      if(segmentsToDl.at(i).rightLineSet) {
-        segmentsToDl.at(i).odomRightLineStart = odomPts.at(odomIdx++);
-        segmentsToDl.at(i).odomRightLineEnd = odomPts.at(odomIdx++);
-      }
+		if(transformRearAxisPointsToOdom(pTfListener, rearAxisPts, odomPts)) {
+			size_t odomIdx = 0;
+			segmentsToDl.at(i).odomStart = odomPts.at(odomIdx++);
+			segmentsToDl.at(i).odomEnd = odomPts.at(odomIdx++);
+			if(segmentsToDl.at(i).leftLineSet) {
+				segmentsToDl.at(i).odomLeftLineStart = odomPts.at(odomIdx++);
+				segmentsToDl.at(i).odomLeftLineEnd = odomPts.at(odomIdx++);
+			}
+			if(segmentsToDl.at(i).rightLineSet) {
+				segmentsToDl.at(i).odomRightLineStart = odomPts.at(odomIdx++);
+				segmentsToDl.at(i).odomRightLineEnd = odomPts.at(odomIdx++);
+			}
 			segmentsToDl.at(i).creationTimestamp = odomPts.at(0).stamp_;
 			segmentsToDl.at(i).odomPointsSet = true;
 		}
@@ -187,8 +187,9 @@ void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
 	}
 }
 
-bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index) {
+bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &possibleIntersection) {
     bool isFirstSegment = (index == 0);
+    possibleIntersection = false;
 
 	if((!isFirstSegment) && (index > segmentsToDl.size())) {
 		ROS_INFO("  index > segmentsToDl.size()");
@@ -213,6 +214,7 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index) {
 			ROS_INFO_STREAM("  too much angle difference: " << (segmentToAdd->angleDiff * 180.f / M_PI) << "[deg]");
 			if(std::abs(previousSegment->angleTotal - segmentToAdd->angleTotal) > (80.f / 180.f * M_PI)) {
 				ROS_INFO("  Maybe found an INTERSECTION?");
+				possibleIntersection = true;
 			}
 			return false;
 		}
@@ -359,12 +361,75 @@ void RoadModel::decreaseAllSegmentTtl() {
 	for(auto it = segmentsToDl.begin(); it != segmentsToDl.end(); ++it) {
 		it->ttl = it->ttl - 1;
 	}
+
+	for(auto it = intersections.begin(); it != intersections.end(); ++it) {
+		it->confidence = it->confidence - .1f;
+	}
+
+	std::remove_if(intersections.begin(), intersections.end(), [](Intersection &i) { return i.confidence <= 0.f; });
 }
 
 void RoadModel::decreaseSegmentTtl(int index) {
 	if(index < segmentsToDl.size()) {
 		segmentsToDl.at(index).ttl = segmentsToDl.at(index).ttl - 1;
 	}
+}
+
+void RoadModel::addIntersectionAt(float x, float confidence) {
+	// TODO: update position/confidence if we already have an intersection there
+
+
+	intersections.push_back(Intersection(x, confidence));
+
+	ROS_INFO("  now having %lu intersections", intersections.size());
+}
+
+bool RoadModel::getIntersections(std::vector<cv::Point2f> &positions, std::vector<float> &confidences, Polynom &drivingLine) {
+	if(intersections.empty()) {
+		return false;
+	}
+
+	// 1) Convert distances to positions
+	for(auto it = intersections.begin(); it != intersections.end(); ++it) {
+		if(!it->odomSet) {
+			tf::Stamped<tf::Point> rearAxisPt, odomPt;
+			rearAxisPt.frame_id_ = "rear_axis_middle_ground";
+			rearAxisPt.stamp_ = ros::Time(0);
+			rearAxisPt.setX(it->distanceTo);
+			rearAxisPt.setY(drivingLine.atX(it->distanceTo));
+			rearAxisPt.setZ(0.0f);
+
+			if(transformRearAxisToOdom(pTfListener, rearAxisPt, odomPt)) {
+				it->odomPosition = odomPt;
+				it->odomSet = true;
+			}
+		}
+	}
+
+	// 2) Transform all odomPosition to rearAxis and return them
+	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
+	for(auto i : intersections) {
+		if(i.odomSet) {
+			odomPts.push_back(i.odomPosition);
+		}
+	}
+
+	if(transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts)) {
+		for(int i = 0; i < rearAxisPts.size(); i++) {
+			if(rearAxisPts.at(i).x() < .1f) {
+//				intersections.erase(intersections.begin() + i);
+				intersections.at(i).confidence = -1.f;
+			} else {
+				positions.push_back(cv::Point2f(rearAxisPts.at(i).x(), rearAxisPts.at(i).y()));
+				confidences.push_back(intersections.at(i).confidence);
+			}
+		}
+	} else {
+		ROS_ERROR("Error while transforming the intersection positions to rear axis");
+		return false;
+	}
+
+	return !positions.empty();
 }
 
 } // namespace drive_ros_image_recognition

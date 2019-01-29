@@ -66,6 +66,19 @@ struct Segment {
     }
 };
 
+struct Intersection {
+	float distanceTo;
+	float confidence;
+	tf::Stamped<tf::Point> odomPosition;
+	bool odomSet = false;
+
+	Intersection(float dist, float conf)
+	: distanceTo(dist)
+	, confidence(conf)
+	{
+	}
+};
+
 class RoadModel {
 	tf::TransformListener *pTfListener;
 
@@ -75,6 +88,7 @@ class RoadModel {
 	int noNewSegmentsCtr = 0; // DEBUG
     float laneWidth;
     bool driveStraight = false;
+    std::vector<Intersection> intersections;
 
 public:
     RoadModel(tf::TransformListener *tfListener, float laneWidth_)
@@ -95,7 +109,10 @@ public:
     void decreaseAllSegmentTtl();
     void decreaseSegmentTtl(int index);
 
-    bool segmentFitsToPrevious(Segment *segmentToAdd, int index);
+    void addIntersectionAt(float x, float confidence);
+    bool getIntersections(std::vector<cv::Point2f> &positions, std::vector<float> &confidences, Polynom &drivingLine);
+
+    bool segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &possibleIntersection);
     float getDrivingLine(Polynom &drivingLine);
     bool getLaneMarkings(Polynom &line, bool leftLine);
 };

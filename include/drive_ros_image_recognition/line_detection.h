@@ -110,7 +110,7 @@ private:
 		  std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle, bool isFirstSegment);
   bool findIntersection(float segmentAngle, cv::Point2f segStartWorld,
 //  		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings);
-		  std::vector<Line*> &verticalMarkings);
+		  std::vector<Line*> &verticalMarkings, float &distanceToIntersection);
 
   float distanceBetweenLines(Line &a, Line &b);
   float pointToLineDistance(Line &l, const cv::Point2f &p);
