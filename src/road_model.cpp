@@ -109,7 +109,9 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		}
 	}
 
-	transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts);
+	if(!transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts)) {
+		return;
+	}
 
 	positions.clear();
 	angles.clear();
@@ -124,6 +126,22 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 			positions.push_back(startPt);
 			angles.push_back(atan2(endPt.y - startPt.y, endPt.x - startPt.x));
 		}
+	}
+
+	if(positions.empty()) {
+		return;
+	}
+
+//	ROS_INFO(" *** First segment is at position (%.2f,%.2f) with angle %.f",
+//			positions.begin()->x, positions.begin()->y, angles.at(0) / M_PI * 180.f);
+	if(positions.begin()->x > .8f) {
+//		ROS_INFO(" *** Create an artificial segment at position 0");
+		// Sometimes the odometry fails and our segments move to the front, so we create a new one at the first position
+		positions.insert(positions.begin(), cv::Point2f(positions.begin()->x * .5f, positions.begin()->y * .5f));
+		angles.insert(angles.begin(), angles.at(0) * .5f);
+		segmentsToDl.insert(segmentsToDl.begin(), Segment());
+//		ROS_INFO(" *** Now is (%.2f,%.2f) with angle %.f",
+//				positions.begin()->x, positions.begin()->y, angles.at(0) / M_PI * 180.f);
 	}
 
 //	ROS_INFO("getSegmentPositions: Returning %lu positions from %lu segments", positions.size(), odomPts.size() / 2);
@@ -302,12 +320,20 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
   // 3) Build the polynom
   line = Polynom(defaultPolyOrder, linePts);
 
+  // Sometimes all coeffs are zero. TODO: Why is this happening
+  bool polyValid = false;
+  for(auto c : line.getCoeffs()) {
+	  if(c != 0.f) {
+		  polyValid = true;
+	  }
+  }
+
 //  ROS_INFO("  Built %s line from %lu points with limits [%.2f, %.2f]",
 //		  (leftLine ? "left" : "right"), linePts.size(),
 //		  std::min_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x,
 //		  std::max_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x);
 
-  return true;
+  return polyValid;
 }
 
 float RoadModel::getDrivingLine(Polynom &drivingLine) {
