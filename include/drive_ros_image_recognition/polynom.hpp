@@ -24,6 +24,13 @@ public:
 
 	}
 
+	Polynom(std::vector<float> &coefficients)
+	: order(coefficients.size() - 1)
+	, coeffs(coefficients)
+	{
+
+	}
+
 	Polynom(int polyOrder, std::vector<cv::Point2f> &points)
 	: order(polyOrder)
 	{

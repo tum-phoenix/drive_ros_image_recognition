@@ -82,7 +82,16 @@ struct Intersection {
 class RoadModel {
 	tf::TransformListener *pTfListener;
 
+	int polyHistoryLen = 5;
+	int polyHistoryIdx = 0;
+	std::vector<Polynom> polyHistory;
+	std::vector<float> polyRangeHistory;
+	bool polyHistoryFilled = false;
+
     Polynom currentDrivingLinePoly;
+    float currentDetectionRange = .0f;
+    int currentPolyAge = 0;
+
 	int defaultPolyOrder = 2;
     float maxPolyError = 10.f;
 	int noNewSegmentsCtr = 0; // DEBUG
@@ -100,8 +109,9 @@ public:
     std::vector<Segment> segmentsToDl; // TODO: make private again
 
     inline void setLaneWidth(float w) { laneWidth = w; }
-    inline void setDefaultPolyOrder(int o) { defaultPolyOrder = o; }
     inline void setMaxPolyErrorThresh(float t) { maxPolyError = t; }
+
+    void setDefaultPolyOrder(int o);
 
     void getSegmentPositions(std::vector<cv::Point2f> &positions, std::vector<float> &angles, ros::Time stamp);
     void updateSegmentAtIndex(Segment &seg, int index);

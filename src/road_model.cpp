@@ -244,17 +244,17 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &po
 
     // Compare to previous polynom
     // TODO: quick hack. think this through
-	if(segmentsToDl.empty()) {
-		return true;
-	}
-    float error = .0f;
-    error += std::fabs(segmentToAdd->positionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->positionWorld.x));
-    error += std::fabs(segmentToAdd->endPositionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->endPositionWorld.x));
-
-    if(error > maxPolyError) {
-    	ROS_INFO("  error based on polynom: %.3f", error);
-        return false;
-    }
+//	if(segmentsToDl.empty()) {
+//		return true;
+//	}
+//    float error = .0f;
+//    error += std::fabs(segmentToAdd->positionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->positionWorld.x));
+//    error += std::fabs(segmentToAdd->endPositionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->endPositionWorld.x));
+//
+//    if(error > maxPolyError) {
+//    	ROS_INFO("  error based on polynom: %.3f", error);
+//        return false;
+//    }
 
 	return true;
 }
@@ -336,6 +336,14 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
   return polyValid;
 }
 
+void RoadModel::setDefaultPolyOrder(int o) {
+	defaultPolyOrder = o;
+	polyHistoryFilled = false;
+	polyHistoryIdx = 0;
+	polyHistory.clear();
+	polyRangeHistory.clear();
+}
+
 float RoadModel::getDrivingLine(Polynom &drivingLine) {
 	std::vector<tf::Stamped<tf::Point>> odomMidPts, rearAxisMidPts;
 
@@ -359,26 +367,91 @@ float RoadModel::getDrivingLine(Polynom &drivingLine) {
 
 	transformOdomPointsToRearAxis(pTfListener, odomMidPts, rearAxisMidPts);
 
-  // 2) Collect points for the polynoms
-  std::vector<cv::Point2f> drivingLinePts;
-   // we always add a point in front of the vehicle
+	// 2) Collect points for the polynoms
+	std::vector<cv::Point2f> drivingLinePts;
+	// we always add a point in front of the vehicle
 	drivingLinePts.push_back(cv::Point2f(.3f, 0.f));
-  for(auto sp : rearAxisMidPts) {
+	for(auto sp : rearAxisMidPts) {
 		drivingLinePts.push_back(cv::Point2f(sp.x(), sp.y()));
-  }
+	}
 
-//  ROS_INFO("Built driving line polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
+	//  ROS_INFO("Built driving line polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
 
-  if(drivingLinePts.size() < 2) {
-    // return a straight line
-    drivingLinePts.push_back(cv::Point(.6, 0.f));
-  }
+	if(drivingLinePts.size() < 2) {
+		// return a straight line
+		drivingLinePts.push_back(cv::Point(.6, 0.f));
+	}
 
-  // 3) Build the polynom
-  int polyOrder = (drivingLinePts.size() > 2) ? defaultPolyOrder : 1;
-  drivingLine = Polynom(polyOrder, drivingLinePts);
+	// 3) Build the polynom
+	int polyOrder = (drivingLinePts.size() > 2) ? defaultPolyOrder : 1;
+	polyOrder = defaultPolyOrder;
+	Polynom newDrivingLine = Polynom(polyOrder, drivingLinePts);
+	float newDetectionRange = drivingLinePts.back().x;
 
-  return drivingLinePts.back().x;
+	if(!polyHistoryFilled) {
+		polyHistory.push_back(newDrivingLine);
+		polyRangeHistory.push_back(newDetectionRange);
+
+		// For now we return the current poly
+		currentDrivingLinePoly = newDrivingLine;
+		currentDetectionRange = newDetectionRange;
+
+		if(polyHistory.size() == polyHistoryLen) {
+			polyHistoryFilled = true;
+		}
+	} else {
+		if(newDrivingLine.getOrder() == defaultPolyOrder) {
+			// Add new poly to history
+			polyHistory.at(polyHistoryIdx) = newDrivingLine;
+			polyRangeHistory.at(polyHistoryIdx) = newDetectionRange;
+			polyHistoryIdx++;
+			polyHistoryIdx = polyHistoryIdx % polyHistoryLen;
+		}
+
+		// Build average over poly history using the coefficients
+		std::vector<float> avgCoeffs(defaultPolyOrder+1, .0f);
+		for(auto p : polyHistory) {
+			for(int i = 0; i < p.getCoeffs().size(); i++) {
+				avgCoeffs.at(i) = avgCoeffs.at(i) + p.getCoeffs().at(i);
+			}
+		}
+		for(int i = 0; i < avgCoeffs.size(); i++) {
+			avgCoeffs.at(i) = avgCoeffs.at(i) / polyHistoryLen;
+		}
+
+		// Return the poly avg
+		currentDrivingLinePoly = Polynom(avgCoeffs);
+		currentDetectionRange = std::accumulate(polyRangeHistory.begin(), polyRangeHistory.end(), .0f) / polyHistoryLen;
+	}
+
+#if 0
+	if(newDetectionRange > .05f) {
+		// 4) Compare to previous polynom
+		float compareRange = std::min(currentDetectionRange, newDetectionRange);
+		int numComparisons = 10;
+		float step = compareRange / numComparisons;
+		float error = .0f;
+		for(int i = 0; i < numComparisons; i++) {
+			float xNow = step + (step * i);
+			error += fabsf(newDrivingLine.atX(xNow) - currentDrivingLinePoly.atX(xNow));
+		}
+		error /= numComparisons;
+		ROS_INFO("=== Polynom error = %.3f in range %.2f", error, compareRange);
+		if(error > maxPolyError) {
+			ROS_WARN("Polynom error too large");
+			currentPolyAge++;
+		} else {
+			currentDrivingLinePoly = newDrivingLine;
+			currentDetectionRange = newDetectionRange;
+			currentPolyAge = 0;
+		}
+	} else {
+		currentPolyAge++;
+	}
+#endif
+
+	drivingLine = currentDrivingLinePoly;
+	return currentDetectionRange;
 }
 
 void RoadModel::decreaseAllSegmentTtl() {

@@ -156,7 +156,7 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     std::vector<float> intersectionConfidences;
     bool foundIntersections = roadModel.getIntersections(intersectionPositions, intersectionConfidences, drivingLinePoly);
     if(foundIntersections) {
-    	ROS_INFO("  Found %lu intersections", intersectionPositions.size());
+//    	ROS_INFO("  Found %lu intersections", intersectionPositions.size());
     	// TODO: publish them
     }
 
@@ -357,16 +357,16 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         // check if we found an intersection
         if(intersectionBasedOnAngle && intersectionBasedOnLines) {
         	if(fabsf(intersectionDistanceBasedOnAngle - intersectionDistanceLines) < segmentLength_) {
-        		ROS_INFO("  INTERSECTION double approved at x=%.2f", intersectionDistanceLines);
+//        		ROS_INFO("  INTERSECTION double approved at x=%.2f", intersectionDistanceLines);
         		roadModel.addIntersectionAt(intersectionDistanceLines, 1.f);
         	} else {
         		ROS_WARN("  Found intersection twice, but not at same position");
         	}
         } else if(intersectionBasedOnAngle) {
-        	ROS_INFO("  INTERSECTION based on angle at x=%.2f", intersectionDistanceBasedOnAngle);
+//        	ROS_INFO("  INTERSECTION based on angle at x=%.2f", intersectionDistanceBasedOnAngle);
         	roadModel.addIntersectionAt(intersectionDistanceBasedOnAngle, .5f);
         } else if(intersectionBasedOnLines) {
-        	ROS_INFO("  INTERSECTION based on lines at %.2f", intersectionDistanceLines);
+//        	ROS_INFO("  INTERSECTION based on lines at %.2f", intersectionDistanceLines);
         	roadModel.addIntersectionAt(intersectionDistanceLines, .5f);
         }
     }
