@@ -211,6 +211,9 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index) {
 		float angleVar = M_PI / 7.0f; // TODO move to config
 		if(std::abs(previousSegment->angleTotal - segmentToAdd->angleTotal) > angleVar) {
 			ROS_INFO_STREAM("  too much angle difference: " << (segmentToAdd->angleDiff * 180.f / M_PI) << "[deg]");
+			if(std::abs(previousSegment->angleTotal - segmentToAdd->angleTotal) > (80.f / 180.f * M_PI)) {
+				ROS_INFO("  Maybe found an INTERSECTION?");
+			}
 			return false;
 		}
 	} else {
