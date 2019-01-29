@@ -119,17 +119,17 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		cv::Point2f endPt  (rearAxisPts.at(i+1).x(), rearAxisPts.at(i+1).y());
 
 		if(startPt.x < 0.f) {
-			ROS_INFO("  remove first point");
+//			ROS_INFO("  remove first point");
 		} else {
 			positions.push_back(startPt);
 			angles.push_back(atan2(endPt.y - startPt.y, endPt.x - startPt.x));
 		}
 	}
 
-	ROS_INFO("getSegmentPositions: Returning %lu positions from %lu segments", positions.size(), odomPts.size() / 2);
+//	ROS_INFO("getSegmentPositions: Returning %lu positions from %lu segments", positions.size(), odomPts.size() / 2);
 
 	if(!positions.empty()) {
-		ROS_INFO("  first position at (%.2f, %.2f)", positions.begin()->x, positions.begin()->y);
+//		ROS_INFO("  first position at (%.2f, %.2f)", positions.begin()->x, positions.begin()->y);
 	}
 
 }
@@ -176,8 +176,6 @@ void RoadModel::setOdomPointsForSegments() {
 }
 
 void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
-	ROS_INFO("  updateSegmentAtIndex %u", index);
-
 	if(index < segmentsToDl.size()) {
 		segmentsToDl.at(index) = seg;
 	} else if(index == segmentsToDl.size()) {
@@ -304,10 +302,10 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
   // 3) Build the polynom
   line = Polynom(defaultPolyOrder, linePts);
 
-  ROS_INFO("  Built %s line from %lu points with limits [%.2f, %.2f]",
-		  (leftLine ? "left" : "right"), linePts.size(),
-		  std::min_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x,
-		  std::max_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x);
+//  ROS_INFO("  Built %s line from %lu points with limits [%.2f, %.2f]",
+//		  (leftLine ? "left" : "right"), linePts.size(),
+//		  std::min_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x,
+//		  std::max_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x);
 
   return true;
 }
@@ -343,7 +341,7 @@ float RoadModel::getDrivingLine(Polynom &drivingLine) {
 		drivingLinePts.push_back(cv::Point2f(sp.x(), sp.y()));
   }
 
-  ROS_INFO("Built driving line polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
+//  ROS_INFO("Built driving line polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
 
   if(drivingLinePts.size() < 2) {
     // return a straight line
@@ -363,10 +361,11 @@ void RoadModel::decreaseAllSegmentTtl() {
 	}
 
 	for(auto it = intersections.begin(); it != intersections.end(); ++it) {
-		it->confidence = it->confidence - .1f;
+		it->confidence = it->confidence - .2f;
 	}
 
-	std::remove_if(intersections.begin(), intersections.end(), [](Intersection &i) { return i.confidence <= 0.f; });
+	auto lastElemToKeep = std::remove_if(intersections.begin(), intersections.end(), [](Intersection &i) { return i.confidence <= 0.f; });
+	intersections.erase(lastElemToKeep, intersections.end());
 }
 
 void RoadModel::decreaseSegmentTtl(int index) {
@@ -376,12 +375,7 @@ void RoadModel::decreaseSegmentTtl(int index) {
 }
 
 void RoadModel::addIntersectionAt(float x, float confidence) {
-	// TODO: update position/confidence if we already have an intersection there
-
-
 	intersections.push_back(Intersection(x, confidence));
-
-	ROS_INFO("  now having %lu intersections", intersections.size());
 }
 
 bool RoadModel::getIntersections(std::vector<cv::Point2f> &positions, std::vector<float> &confidences, Polynom &drivingLine) {
@@ -406,7 +400,28 @@ bool RoadModel::getIntersections(std::vector<cv::Point2f> &positions, std::vecto
 		}
 	}
 
-	// 2) Transform all odomPosition to rearAxis and return them
+	// 2) Combine intersection positions which are close together
+	for(auto i = intersections.begin(); i != intersections.end(); ++i) {
+		for(auto j = i + 1; j != intersections.end(); ++j) {
+			if(i->odomSet && j->odomSet && (i->confidence > 0.f) && (j->confidence > 0.f)) {
+				// calculate distance between points
+				auto xDist = i->odomPosition.x() - j->odomPosition.x();
+				auto yDist = i->odomPosition.y() - j->odomPosition.y();
+				auto dist = sqrtf(xDist*xDist + yDist*yDist);
+				if(dist < .3f) {
+					ROS_INFO("  fuse two intersection positions");
+					i->confidence = i->confidence + .3f;
+					j->confidence = -1.f;
+				}
+			}
+		}
+	}
+
+	// Remove the intersection we just merged
+	auto lastElemToKeep = std::remove_if(intersections.begin(), intersections.end(), [](Intersection &i) { return i.confidence <= 0.f; });
+	intersections.erase(lastElemToKeep, intersections.end());
+
+	// 3) Transform all odomPosition to rearAxis and return them
 	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
 	for(auto i : intersections) {
 		if(i.odomSet) {
@@ -416,8 +431,7 @@ bool RoadModel::getIntersections(std::vector<cv::Point2f> &positions, std::vecto
 
 	if(transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts)) {
 		for(int i = 0; i < rearAxisPts.size(); i++) {
-			if(rearAxisPts.at(i).x() < .1f) {
-//				intersections.erase(intersections.begin() + i);
+			if(rearAxisPts.at(i).x() < .3f) {
 				intersections.at(i).confidence = -1.f;
 			} else {
 				positions.push_back(cv::Point2f(rearAxisPts.at(i).x(), rearAxisPts.at(i).y()));

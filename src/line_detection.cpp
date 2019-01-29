@@ -183,12 +183,12 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     if(rightLineFound) {
       drawLaneMarking(rightLinePoly, cv::Scalar(0,0,255));
 
-      std::stringstream ss;
-      for(auto c : rightLinePoly.getCoeffs()) {
-    	  ss << c << " ";
-      }
-
-      ROS_INFO("  %s", ss.str().c_str());
+//      std::stringstream ss;
+//      for(auto c : rightLinePoly.getCoeffs()) {
+//    	  ss << c << " ";
+//      }
+//
+//      ROS_INFO("  %s", ss.str().c_str());
     }
 
     // Draw intersections
@@ -199,8 +199,10 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     	}
 
     	if(image_operator_.worldToWarpedImg(worldPts, imgPts)) {
-    		for(auto p : imgPts)
-    		cv::drawMarker(debugImg_, p, cv::Scalar(255), cv::MARKER_TRIANGLE_DOWN, 10, 3);
+    		for(auto p : imgPts) {
+    			cv::drawMarker(debugImg_, p, cv::Scalar(255), cv::MARKER_TRIANGLE_DOWN, 10, 3);
+    			ROS_INFO("    (%.2f,%.2f)", p.x, p.y);
+    		}
     	}
     }
 
@@ -257,7 +259,6 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 
         regions = buildRegions(segStartWorld, segAngle);
         assignLinesToRegions(&regions, segAngle, unusedLines, leftMarkings, midMarkings, rightMarkings, verticalMarkings, otherMarkings);
-        ROS_INFO("  %lu vertical lines", verticalMarkings.size());
 
 #if 0
         // DEBUG: draw the assigned lines
@@ -356,23 +357,23 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         // check if we found an intersection
         if(intersectionBasedOnAngle && intersectionBasedOnLines) {
         	if(fabsf(intersectionDistanceBasedOnAngle - intersectionDistanceLines) < segmentLength_) {
-        		ROS_INFO("  INTERSECTION double approved");
+        		ROS_INFO("  INTERSECTION double approved at x=%.2f", intersectionDistanceLines);
         		roadModel.addIntersectionAt(intersectionDistanceLines, 1.f);
         	} else {
         		ROS_WARN("  Found intersection twice, but not at same position");
         	}
         } else if(intersectionBasedOnAngle) {
-        	ROS_INFO("  INTERSECTION based on angle");
+        	ROS_INFO("  INTERSECTION based on angle at x=%.2f", intersectionDistanceBasedOnAngle);
         	roadModel.addIntersectionAt(intersectionDistanceBasedOnAngle, .5f);
         } else if(intersectionBasedOnLines) {
-        	ROS_INFO("  INTERSECTION based on lines");
+        	ROS_INFO("  INTERSECTION based on lines at %.2f", intersectionDistanceLines);
         	roadModel.addIntersectionAt(intersectionDistanceLines, .5f);
         }
     }
 
-    ROS_INFO("  All left markings: %.3f", isDashedLine(allLeftMarkings));
-    ROS_INFO("  All mid markings: %.3f", isDashedLine(allMidMarkings));
-    ROS_INFO("  All right markings: %.3f", isDashedLine(allRightMarkings));
+//    ROS_INFO("  All left markings: %.3f", isDashedLine(allLeftMarkings));
+//    ROS_INFO("  All mid markings: %.3f", isDashedLine(allMidMarkings));
+//    ROS_INFO("  All right markings: %.3f", isDashedLine(allRightMarkings));
 
     roadModel.setOdomPointsForSegments();
     roadModel.decreaseAllSegmentTtl();
@@ -674,8 +675,6 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     worldPts.push_back(segStartWorld);
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
-    ROS_INFO("> RANSAC");
-
     if(numLines == 0) {
         ROS_WARN("  no lines for Ransac");
         return Segment(segStartWorld, imgPts.at(0), 0.f, prevAngle, segmentLength_, 0.f);
@@ -958,7 +957,6 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 }
 
 bool LineDetection::findIntersection(float segmentAngle, cv::Point2f segStartWorld,
-//		std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings, std::vector<Line*> &rightMarkings) {
 		std::vector<Line*> &verticalMarkings, float &distanceToIntersection) {
 
 	bool foundIntersection = false;
@@ -967,55 +965,44 @@ bool LineDetection::findIntersection(float segmentAngle, cv::Point2f segStartWor
 	int numStopLines = 0;
 
 	for(auto l : verticalMarkings) {
-		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (25.f / 180.f * M_PI)) {
+		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (5.f / 180.f * M_PI)) {
+
+			if(l->wP1_.x < .3f || l->wP2_.x < .3f) {
+				continue;
+			}
+
 			float yDiff1 = l->wP1_.y  - segStartWorld.y;
 			float yDiff2 = l->wP2_.y  - segStartWorld.y;
 
 			if((yDiff1 > laneWidthWorld_) || (yDiff2 > laneWidthWorld_)) {
 				leftExists = true;
 			}
-			if((yDiff1 < (.25f * laneWidthWorld_)) || (yDiff2 < (.25f * laneWidthWorld_))) {
+			if((yDiff1 < (-.5f * laneWidthWorld_)) || (yDiff2 < (-.5f * laneWidthWorld_))) {
 				rightExists = true;
 			}
-			if((yDiff1 < laneWidthWorld_) || (yDiff2 < laneWidthWorld_) ||
-					(yDiff1 > (.25f * laneWidthWorld_)) || (yDiff2 > (.25f * laneWidthWorld_))) {
+			// if (yDiff1 < laneWidth AND yDiff1 > -0.4*laneWidth) OR( yDiff2 < laneWidth AND yDiff2 > -0.4*laneWidth)
+			if(
+					((yDiff1 < laneWidthWorld_) && (yDiff1 > (-.4f * laneWidthWorld_)))
+					||
+					((yDiff2 < laneWidthWorld_) && (yDiff2 > (-.4f * laneWidthWorld_)))
+			) {
 				middleExists = true;
-				numStopLines++;
+				numStopLines += 2;
 				stopLineXpos += l->wP1_.x;
 				stopLineXpos += l->wP2_.x;
 			}
 		}
 	}
 
-//	for(auto l : leftMarkings) {
-//		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (25.f / 180.f * M_PI)) {
-//			leftExists = true;
-//		}
-//	}
-//
-//	for(auto l : midMarkings) {
-//		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (25.f / 180.f * M_PI)) {
-//			middleExists = true;
-//			numStopLines++;
-//			stopLineAngle += l->getAngle();
-//			stopLineXpos += l->wP1_.x;
-//			stopLineXpos += l->wP2_.x;
-//		}
-//	}
-//
-//	for(auto l : rightMarkings) {
-//		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (25.f / 180.f * M_PI)) {
-//			rightExists = true;
-//		}
-//	}
-
-	ROS_INFO("  Left: %s  Mid: %s  Right: %s",
-			(leftExists ? "yes" : "no"), (middleExists ? "yes" : "no"), (rightExists ? "yes" : "no"));
+//	ROS_INFO("  Left: %s  Mid: %s  Right: %s",
+//			(leftExists ? "yes" : "no"), (middleExists ? "yes" : "no"), (rightExists ? "yes" : "no"));
 
 	// Build a segment for the whole intersection
-	distanceToIntersection = stopLineXpos * .5f;
+	if(numStopLines > 0) {
+		distanceToIntersection = stopLineXpos / numStopLines;
+	}
 
-	if(distanceToIntersection < .1f) {
+	if(distanceToIntersection < .3f) {
 		// We sometimes get vertical lines from the car or at the warped image boarder
 		return false;
 	}
