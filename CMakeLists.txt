@@ -32,11 +32,12 @@ find_package(Boost REQUIRED)
 
 generate_dynamic_reconfigure_options(
     cfg/LineDetection.cfg
+    cfg/BarredAreaDetection.cfg
 )
 
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS cv_bridge image_transport image_geometry roscpp sensor_msgs drive_ros_msgs
+  CATKIN_DEPENDS cv_bridge image_transport image_geometry roscpp sensor_msgs drive_ros_msgs tf
 )
 
 find_package(OpenCV REQUIRED)
