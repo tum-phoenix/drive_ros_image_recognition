@@ -99,7 +99,7 @@ private:
     return sqrt(dX * dX + dY * dY);
   }
 
-  std::vector<cv::RotatedRect> buildRegions(cv::Point2f position, float angle);
+  std::vector<cv::RotatedRect> buildRegions(std::vector<cv::RotatedRect> &intersectionRegions, cv::Point2f position, float angle);
   void assignLinesToRegions(std::vector<cv::RotatedRect> *regions, float angle, std::vector<Line*> &lines,
                             std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
 							std::vector<Line*> &rightMarkings, std::vector<Line*> &verticalMarkings,
@@ -109,7 +109,7 @@ private:
   bool pointIsInRegion(cv::Point2f *pt, cv::Point2f *edges) const;
   Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
 		  std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle, bool isFirstSegment);
-  bool findIntersection(float segmentAngle, cv::Point2f segStartWorld,
+  bool findIntersection(std::vector<cv::RotatedRect> *regions, float segmentAngle, cv::Point2f segStartWorld,
 		  std::vector<Line*> &verticalMarkings, float &distanceToIntersection, bool &stopLineFound);
 
   float distanceBetweenLines(Line &a, Line &b);

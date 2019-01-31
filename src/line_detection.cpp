@@ -211,7 +211,6 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     	if(image_operator_.worldToWarpedImg(worldPts, imgPts)) {
     		for(auto p : imgPts) {
     			cv::drawMarker(debugImg_, p, cv::Scalar(255), cv::MARKER_TRIANGLE_DOWN, 10, 3);
-    			ROS_INFO("    (%.2f,%.2f)", p.x, p.y);
     		}
     	}
     }
@@ -267,7 +266,8 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     		}
     	}
 
-        regions = buildRegions(segStartWorld, segAngle);
+    	std::vector<cv::RotatedRect> intersectionRegions;
+        regions = buildRegions(intersectionRegions, segStartWorld, segAngle);
         assignLinesToRegions(&regions, segAngle, unusedLines, leftMarkings, midMarkings, rightMarkings, verticalMarkings, otherMarkings);
 
 #if 0
@@ -340,7 +340,7 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         bool intersectionBasedOnAngle;
         bool intersectionWithStopLine; // This could be a stop or yield line
         auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle, i == 0);
-        bool intersectionBasedOnLines = findIntersection(segAngle, segStartWorld,
+        bool intersectionBasedOnLines = findIntersection(&intersectionRegions, segAngle, segStartWorld,
         		verticalMarkings, intersectionDistanceLines, intersectionWithStopLine);
 
         // Check if the found segment fits with the previous one
@@ -420,12 +420,14 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 /// \param angle orientation of the segment in [rad]
 /// \return the three regions in image coordinates
 ///
-std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWorld, float angle) {
-	int numRegions = 3;
+std::vector<cv::RotatedRect> LineDetection::buildRegions(
+		std::vector<cv::RotatedRect> &intersectionRegions, cv::Point2f positionWorld, float angle) {
+	int numRegions = 5; // 3 line search segment + 2 intersection
     std::vector<cv::RotatedRect> regions(numRegions);
-    std::vector<cv::Point2f> imgPts(1), worldPts(2);
+    std::vector<cv::Point2f> imgPts(1), worldPts(3);
     cv::Vec2f dirVec(cos(angle), sin(angle)); // in world coordinates
     cv::Vec2f leftVec(laneWidthWorld_ * dirVec[1], laneWidthWorld_ * dirVec[0]); // in world coordinates
+    intersectionRegions.clear();
 
     // Convert the position to image coordinates
     worldPts.at(0) = positionWorld;
@@ -437,9 +439,12 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
     worldPts.at(0) = worldPtOuterRegionSize;
     cv::Point2f worldPtMiddleRegionSize(positionWorld.x + segmentLength_, positionWorld.y + (1.f * laneWidthWorld_));
     worldPts.at(1) = worldPtMiddleRegionSize;
+    cv::Point2f worldPtIntersectionMidSize(positionWorld.x + segmentLength_, positionWorld.y +(1.5f * laneWidthWorld_));
+    worldPts.at(2) = worldPtIntersectionMidSize;
     image_operator_.worldToWarpedImg(worldPts, imgPts);
     cv::Size outerRegionSize(imgPts.at(0).x - positionImg.x, positionImg.y - imgPts.at(0).y);
     cv::Size innerRegionSize(imgPts.at(1).x - positionImg.x, positionImg.y - imgPts.at(1).y);
+    cv::Size innerIntersectionRegionSize(imgPts.at(2).x - positionImg.x, positionImg.y - imgPts.at(2).y);
 
     // Get the region points in world coordinates
     worldPts.resize(numRegions);
@@ -454,16 +459,28 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
     cv::Point2f centerLeftRegion(centerMidRegion.x - 1.1f*leftVec[0],
     							 centerMidRegion.y + 1.1f*leftVec[1]);
 
+    cv::Point2f centerRightIntersectionRegion(centerMidRegion.x + 1.8f*leftVec[0],
+    										  centerMidRegion.y - 1.8f*leftVec[1]);
+
+    cv::Point2f centerLeftIntersectionRegion(centerMidRegion.x - 1.8f*leftVec[0],
+    										 centerMidRegion.y + 1.8f*leftVec[1]);
 
     worldPts.at(0) = centerLeftRegion;
     worldPts.at(1) = centerMidRegion;
     worldPts.at(2) = centerRightRegion;
+    worldPts.at(3) = centerRightIntersectionRegion;
+    worldPts.at(4) = centerLeftIntersectionRegion;
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
     // Create the regions
     regions.at(0) = cv::RotatedRect(imgPts.at(0), outerRegionSize, (-angle * 180.f / M_PI));
     regions.at(1) = cv::RotatedRect(imgPts.at(1), innerRegionSize, (-angle * 180.f / M_PI));
     regions.at(2) = cv::RotatedRect(imgPts.at(2), outerRegionSize, (-angle * 180.f / M_PI));
+
+    // Build the intersection regions
+    intersectionRegions.push_back(cv::RotatedRect(imgPts.at(4), innerRegionSize, (-angle * 180.f / M_PI)));
+    intersectionRegions.push_back(cv::RotatedRect(imgPts.at(1), innerIntersectionRegionSize, (-angle * 180.f / M_PI)));
+    intersectionRegions.push_back(cv::RotatedRect(imgPts.at(3), innerRegionSize, (-angle * 180.f / M_PI)));
 
 #ifdef PUBLISH_DEBUG
     if(drawDebugLines_) {
@@ -475,6 +492,17 @@ std::vector<cv::RotatedRect> LineDetection::buildRegions(cv::Point2f positionWor
     		for(int i = 0; i < 4; i++)
     			cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255));
     	}
+    }
+#endif
+
+#if 0
+    for(int i = 0; i < 3; i++) {
+    	auto r = intersectionRegions.at(i);
+    	cv::Point2f edges[4];
+    	r.points(edges);
+
+    	for(int i = 0; i < 4; i++)
+    		cv::line(debugImg_, edges[i], edges[(i+1)%4], cv::Scalar(255,211), 2);
     }
 #endif
 
@@ -492,83 +520,33 @@ void LineDetection::assignLinesToRegions(std::vector<cv::RotatedRect> *regions, 
                                          std::vector<Line*> &rightMarkings, std::vector<Line*> &verticalMarkings,
 										 std::vector<Line*> &otherMarkings) {
 
-    for(auto linesIt = lines.begin(); linesIt != lines.end(); ++linesIt) {
-    	// first check if the angle is ok to ignore stop and start lines
-//    	if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_2) {
-//    		verticalMarkings.push_back(*linesIt);
-//    	} else
-    	{
-    		if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
-    			if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_4)
-    				verticalMarkings.push_back(*linesIt);
-    			else
-    				leftMarkings.push_back(*linesIt);
-    		} else if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
-    			if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_4)
-    				verticalMarkings.push_back(*linesIt);
-    			else
-    				midMarkings.push_back(*linesIt);
-    		} else if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
-    			if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_4)
-    				verticalMarkings.push_back(*linesIt);
-    			else
-    				rightMarkings.push_back(*linesIt);
-    		} else {
-    			otherMarkings.push_back(*linesIt);
-    		}
-    	}
-    }
-
-
-
-#if 0
-    // TODO: look over the idea of building rects around the lines again
-//    ROS_INFO("---");
-    std::vector<cv::Point2f> linePointsWorld;
-    for(auto l : leftMarkings) {
-    	linePointsWorld.push_back(l->wP1_);
-    	linePointsWorld.push_back(l->wP2_);
-    }
-    if(!linePointsWorld.empty()) {
-    	auto rotatedRect = cv::minAreaRect(linePointsWorld);
-    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-//    		ROS_INFO("Left markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
-//    		leftMarkings.clear();
-    	}
-    }
-
-    linePointsWorld.clear();
-    for(auto l : midMarkings) {
-    	linePointsWorld.push_back(l->wP1_);
-    	linePointsWorld.push_back(l->wP2_);
-    }
-    // TODO: if there is a double line, it could be bigger. test if we need a higher limit here
-    if(!linePointsWorld.empty()) {
-    	auto rotatedRect = cv::minAreaRect(linePointsWorld);
-//    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-//    		ROS_INFO("Mid markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
-//    	}
-    }
-
-    linePointsWorld.clear();
-    for(auto l : rightMarkings) {
-    	linePointsWorld.push_back(l->wP1_);
-    	linePointsWorld.push_back(l->wP2_);
-    }
-    if(!linePointsWorld.empty()) {
-    	auto rotatedRect = cv::minAreaRect(linePointsWorld);
-    	if((rotatedRect.size.height > 0.1f) && (rotatedRect.size.width > 0.1f)) {
-//    		ROS_INFO("Right markings rect size = (%.3f, %.3f)", rotatedRect.size.width, rotatedRect.size.height);
-//    		rightMarkings.clear();
-    	}
-    }
-#endif
+	for(auto linesIt = lines.begin(); linesIt != lines.end(); ++linesIt) {
+		if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
+			if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_4)
+				verticalMarkings.push_back(*linesIt);
+			else
+				leftMarkings.push_back(*linesIt);
+		} else if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
+			if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_4)
+				verticalMarkings.push_back(*linesIt);
+			else
+				midMarkings.push_back(*linesIt);
+		} else if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
+			if(fabsf(angle - (*linesIt)->getAngle()) > M_PI_4)
+				verticalMarkings.push_back(*linesIt);
+			else
+				rightMarkings.push_back(*linesIt);
+		} else {
+			otherMarkings.push_back(*linesIt);
+		}
+	}
 }
 
 float LineDetection::isDashedLine(std::vector<Line*> &laneMarkings) {
 	int numNotDashed = 0;
+//	ROS_INFO("  isDashedLine: num lane markings: %lu", laneMarkings.size());
 
-	if(laneMarkings.empty()) {
+	if(laneMarkings.size() < 3) {
 		return .51f; // TODO: put lower bound in config1
 	}
 
@@ -816,6 +794,7 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     // 5) Fit polynom in each line
     int lanePosFrom = 0; // DEBUG
     float detectedRange = 0.f;
+    float detectedLen = .0f;
     int numLaneMarkingsDetected = 0;
     bool leftLineFound = false, rightLineFound = false;
     cv::Point2f leftLineStart, leftLineEnd, rightLineStart, rightLineEnd;
@@ -855,6 +834,9 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	leftLineStart.y = poly.atX(xMin);
     	leftLineEnd.x = xMax;
     	leftLineEnd.y = poly.atX(xMax);
+
+    	// Calculate detected length
+    	detectedLen += getDistanceBetweenPoints(leftLineStart, leftLineEnd);
     }
 
     if(!rightInlierPtsWorld.empty()) {
@@ -892,6 +874,9 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	rightLineStart.y = poly.atX(xMin);
     	rightLineEnd.x = xMax;
     	rightLineEnd.y = poly.atX(xMax);
+
+    	// Calculate detected length
+    	detectedLen += getDistanceBetweenPoints(rightLineStart, rightLineEnd);
     }
 
     if(!midInlierPtsWorld.empty()) {
@@ -919,13 +904,22 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 
     	detectedRange += xMax;
     	numLaneMarkingsDetected++;
+
+    	// Calculate detected length
+    	cv::Point2f midStart, midEnd;
+    	midStart.x = xMin;
+    	midStart.y = poly.atX(xMin);
+    	midEnd.x = xMax;
+    	midEnd.y = poly.atX(xMax);
+    	detectedLen += getDistanceBetweenPoints(midStart, midEnd);
     }
 
 
     // 6) Build the segment
     // Calculate the segment end point
     detectedRange /= numLaneMarkingsDetected;
-    float segmentLen = std::min(detectedRange - segStartWorld.x, segmentLength_);
+    detectedLen /= numLaneMarkingsDetected;
+    float segmentLen = std::min(detectedLen, segmentLength_);
     cv::Point2f segEndWorld;
     segEndWorld.x = laneMidPt.x + cos(bestAngle) * segmentLen;
     segEndWorld.y = laneMidPt.y + sin(bestAngle) * segmentLen;
@@ -966,53 +960,54 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     return s;
 }
 
-bool LineDetection::findIntersection(float segmentAngle, cv::Point2f segStartWorld,
+bool LineDetection::findIntersection(std::vector<cv::RotatedRect> *regions, float segmentAngle, cv::Point2f segStartWorld,
 		std::vector<Line*> &verticalMarkings, float &distanceToIntersection, bool &stopLineFound) {
 
 	bool foundIntersection = false;
 	bool middleExists = false, rightExists = false, leftExists = false;
 	float stopLineXpos = 0.f;
-	int numStopLines = 0;
 	stopLineFound = false;
 
-	for(auto l : verticalMarkings) {
-		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (5.f / 180.f * M_PI)) {
-
-			if(l->wP1_.x < .3f || l->wP2_.x < .3f) {
+	// Assign the lines to the regions (left, middle, right)
+	std::vector<Line*> leftMarkings, midMarkings, rightMarkings;
+	for(auto linesIt = verticalMarkings.begin(); linesIt != verticalMarkings.end(); ++linesIt) {
+		// first check the angle
+		if((fabsf((*linesIt)->getAngle() - segmentAngle) - M_PI_2) < (5.f / 180.f * M_PI)) {
+			// Ignore lines closer than 0.2[m] because these could be from the car
+			if((*linesIt)->wP1_.x < .2f || (*linesIt)->wP2_.x < .2f) {
 				continue;
 			}
 
-			float yDiff1 = l->wP1_.y  - segStartWorld.y;
-			float yDiff2 = l->wP2_.y  - segStartWorld.y;
-
-			if((yDiff1 > laneWidthWorld_) || (yDiff2 > laneWidthWorld_)) {
-				leftExists = true;
+			// A line can lay in more than one region
+			if(lineIsInRegion(*linesIt, &(regions->at(0)), true)) {
+				leftMarkings.push_back(*linesIt);
 			}
-			if((yDiff1 < (-.5f * laneWidthWorld_)) || (yDiff2 < (-.5f * laneWidthWorld_))) {
-				rightExists = true;
+			if(lineIsInRegion(*linesIt, &(regions->at(1)), true)) {
+				midMarkings.push_back(*linesIt);
 			}
-			// if (yDiff1 < laneWidth AND yDiff1 > -0.4*laneWidth) OR( yDiff2 < laneWidth AND yDiff2 > -0.4*laneWidth)
-			if(
-					((yDiff1 < laneWidthWorld_) && (yDiff1 > (-.4f * laneWidthWorld_)))
-					||
-					((yDiff2 < laneWidthWorld_) && (yDiff2 > (-.4f * laneWidthWorld_)))
-			) {
-				middleExists = true;
-				numStopLines += 2;
-				stopLineXpos += l->wP1_.x;
-				stopLineXpos += l->wP2_.x;
+			if(lineIsInRegion(*linesIt, &(regions->at(2)), true)) {
+				rightMarkings.push_back(*linesIt);
 			}
 		}
 	}
 
-	ROS_INFO("  Left: %s  Mid: %s  Right: %s",
-			(leftExists ? "yes" : "no"), (middleExists ? "yes" : "no"), (rightExists ? "yes" : "no"));
+	leftExists = leftMarkings.size() > 1;
+	middleExists = midMarkings.size() > 1;
+	rightExists = rightMarkings.size() > 1;
 
-	// Build a segment for the whole intersection
-	if(numStopLines > 0) {
-		distanceToIntersection = stopLineXpos / numStopLines;
+	ROS_INFO("  Left: %lu  Mid: %lu  Right: %lu", leftMarkings.size(), midMarkings.size(), rightMarkings.size());
+
+	// if there think there is an intersection, we calculate the distance to it
+	if(middleExists) {
+		for(auto l : midMarkings) {
+			stopLineXpos += l->wP1_.x;
+			stopLineXpos += l->wP2_.x;
+		}
 	}
 
+	distanceToIntersection = stopLineXpos / (2 * midMarkings.size());
+
+	// guess the type of the intersection (stop/yield, go-through, start line)
 	if(distanceToIntersection < .3f) {
 		// We sometimes get vertical lines from the car or at the warped image boarder
 		return false;
@@ -1024,6 +1019,7 @@ bool LineDetection::findIntersection(float segmentAngle, cv::Point2f segStartWor
 		stopLineFound = true;
 	}
 	if(!middleExists && leftExists && rightExists) {
+		distanceToIntersection = segStartWorld.x;
 		ROS_INFO("  INTERSECTION found - do not stop in %.2f[m]", distanceToIntersection);
 		foundIntersection = true;
 	}
