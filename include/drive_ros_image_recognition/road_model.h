@@ -69,12 +69,14 @@ struct Segment {
 struct Intersection {
 	float distanceTo;
 	float confidence;
+	bool stopLineFound;
 	tf::Stamped<tf::Point> odomPosition;
 	bool odomSet = false;
 
-	Intersection(float dist, float conf)
+	Intersection(float dist, float conf, bool hasStopLine)
 	: distanceTo(dist)
 	, confidence(conf)
+	, stopLineFound(hasStopLine)
 	{
 	}
 };
@@ -119,8 +121,9 @@ public:
     void decreaseAllSegmentTtl();
     void decreaseSegmentTtl(int index);
 
-    void addIntersectionAt(float x, float confidence);
-    bool getIntersections(std::vector<cv::Point2f> &positions, std::vector<float> &confidences, Polynom &drivingLine);
+    void addIntersectionAt(float x, float confidence, bool hasStopLine);
+    bool getIntersections(std::vector<tf::Stamped<tf::Point>> &positions, std::vector<float> &confidences,
+    		std::vector<bool> &hasStopLine, Polynom &drivingLine);
 
     bool segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &possibleIntersection);
     float getDrivingLine(Polynom &drivingLine);

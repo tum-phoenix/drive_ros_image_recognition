@@ -8,11 +8,13 @@
 #include <random>
 #include <functional>
 #include <sstream>
+#include <tf/transform_datatypes.h>
 #include "drive_ros_image_recognition/line_detection.h"
 #include "drive_ros_image_recognition/geometry_common.h"
 #include "drive_ros_msgs/RoadLine.h"
 #include "drive_ros_msgs/simple_trajectory.h"
 #include "drive_ros_msgs/DrivingLine.h"
+#include "drive_ros_msgs/DetectedIntersection.h"
 
 namespace drive_ros_image_recognition {
 
@@ -54,6 +56,9 @@ bool LineDetection::init() {
 
     drivingLinePub = nh_.advertise<drive_ros_msgs::DrivingLine>("driving_line_topic", 1);
     ROS_INFO("Publish driving line on topic '%s'", drivingLinePub.getTopic().c_str());
+
+    detectedIntersectionsPub = nh_.advertise<drive_ros_msgs::DetectedIntersection>("detected_intersection_topic", 1);
+    ROS_INFO("Publish detected intersection on topic '%s'", detectedIntersectionsPub.getTopic().c_str());
 
 #ifdef PUBLISH_DEBUG
     debugImgPub_ = imageTransport_.advertise("debug_image", 3);
@@ -152,12 +157,24 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     drivingLinePub.publish(drivingLineMsg);
 
     // Check if we found an intersection
-    std::vector<cv::Point2f> intersectionPositions;
+    std::vector<tf::Stamped<tf::Point>> intersectionPositions;
     std::vector<float> intersectionConfidences;
-    bool foundIntersections = roadModel.getIntersections(intersectionPositions, intersectionConfidences, drivingLinePoly);
+    std::vector<bool> intersectionStopLines;
+    bool foundIntersections = roadModel.getIntersections(intersectionPositions, intersectionConfidences,
+    		intersectionStopLines, drivingLinePoly);
     if(foundIntersections) {
-//    	ROS_INFO("  Found %lu intersections", intersectionPositions.size());
-    	// TODO: publish them
+    	drive_ros_msgs::DetectedIntersection intersectionMsg;
+    	intersectionMsg.header.stamp = imgTimestamp;
+    	for(int i = 0; i < intersectionPositions.size(); i++) {
+    		geometry_msgs::PointStamped ptStamped;
+    		tf::pointStampedTFToMsg(intersectionPositions.at(i), ptStamped);
+    		intersectionMsg.positions.push_back(ptStamped);
+    		intersectionMsg.confidences.push_back(intersectionConfidences.at(i));
+    		intersectionMsg.stop_line_detected.push_back(intersectionStopLines.at(i));
+    	}
+
+    	// Publish the message
+    	detectedIntersectionsPub.publish(intersectionMsg);
     }
 
 #ifdef PUBLISH_DEBUG
@@ -182,20 +199,13 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     }
     if(rightLineFound) {
       drawLaneMarking(rightLinePoly, cv::Scalar(0,0,255));
-
-//      std::stringstream ss;
-//      for(auto c : rightLinePoly.getCoeffs()) {
-//    	  ss << c << " ";
-//      }
-//
-//      ROS_INFO("  %s", ss.str().c_str());
     }
 
     // Draw intersections
     if(foundIntersections) {
     	std::vector<cv::Point2f> worldPts, imgPts;
     	for(int i = 0; i < intersectionPositions.size(); i++) {
-    		worldPts.push_back(intersectionPositions.at(i));
+    		worldPts.push_back(cv::Point2f(intersectionPositions.at(i).x(), intersectionPositions.at(i).y()));
     	}
 
     	if(image_operator_.worldToWarpedImg(worldPts, imgPts)) {
@@ -328,8 +338,10 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         // Find the street segment with RANSAC
         float intersectionDistanceLines, intersectionDistanceBasedOnAngle;
         bool intersectionBasedOnAngle;
+        bool intersectionWithStopLine; // This could be a stop or yield line
         auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle, i == 0);
-        bool intersectionBasedOnLines = findIntersection(segAngle, segStartWorld, verticalMarkings, intersectionDistanceLines);
+        bool intersectionBasedOnLines = findIntersection(segAngle, segStartWorld,
+        		verticalMarkings, intersectionDistanceLines, intersectionWithStopLine);
 
         // Check if the found segment fits with the previous one
         if(roadModel.segmentFitsToPrevious(&seg, i, intersectionBasedOnAngle)) {
@@ -357,17 +369,15 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         // check if we found an intersection
         if(intersectionBasedOnAngle && intersectionBasedOnLines) {
         	if(fabsf(intersectionDistanceBasedOnAngle - intersectionDistanceLines) < segmentLength_) {
-//        		ROS_INFO("  INTERSECTION double approved at x=%.2f", intersectionDistanceLines);
-        		roadModel.addIntersectionAt(intersectionDistanceLines, 1.f);
+        		roadModel.addIntersectionAt(intersectionDistanceLines, 1.f, intersectionWithStopLine);
         	} else {
         		ROS_WARN("  Found intersection twice, but not at same position");
         	}
         } else if(intersectionBasedOnAngle) {
-//        	ROS_INFO("  INTERSECTION based on angle at x=%.2f", intersectionDistanceBasedOnAngle);
-        	roadModel.addIntersectionAt(intersectionDistanceBasedOnAngle, .5f);
+        	// If our find intersection did not find anything, it is pretty sure there was no stop line
+        	roadModel.addIntersectionAt(intersectionDistanceBasedOnAngle, .5f, false);
         } else if(intersectionBasedOnLines) {
-//        	ROS_INFO("  INTERSECTION based on lines at %.2f", intersectionDistanceLines);
-        	roadModel.addIntersectionAt(intersectionDistanceLines, .5f);
+        	roadModel.addIntersectionAt(intersectionDistanceLines, .5f, intersectionWithStopLine);
         }
     }
 
@@ -957,12 +967,13 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 }
 
 bool LineDetection::findIntersection(float segmentAngle, cv::Point2f segStartWorld,
-		std::vector<Line*> &verticalMarkings, float &distanceToIntersection) {
+		std::vector<Line*> &verticalMarkings, float &distanceToIntersection, bool &stopLineFound) {
 
 	bool foundIntersection = false;
 	bool middleExists = false, rightExists = false, leftExists = false;
 	float stopLineXpos = 0.f;
 	int numStopLines = 0;
+	stopLineFound = false;
 
 	for(auto l : verticalMarkings) {
 		if(std::abs(l->getAngle() - segmentAngle - M_PI_2) < (5.f / 180.f * M_PI)) {
@@ -994,8 +1005,8 @@ bool LineDetection::findIntersection(float segmentAngle, cv::Point2f segStartWor
 		}
 	}
 
-//	ROS_INFO("  Left: %s  Mid: %s  Right: %s",
-//			(leftExists ? "yes" : "no"), (middleExists ? "yes" : "no"), (rightExists ? "yes" : "no"));
+	ROS_INFO("  Left: %s  Mid: %s  Right: %s",
+			(leftExists ? "yes" : "no"), (middleExists ? "yes" : "no"), (rightExists ? "yes" : "no"));
 
 	// Build a segment for the whole intersection
 	if(numStopLines > 0) {
@@ -1010,6 +1021,7 @@ bool LineDetection::findIntersection(float segmentAngle, cv::Point2f segStartWor
 	if(middleExists && (leftExists || rightExists)) {
 		ROS_INFO("  INTERSECTION found - stop in %.2f[m]", distanceToIntersection);
 		foundIntersection = true;
+		stopLineFound = true;
 	}
 	if(!middleExists && leftExists && rightExists) {
 		ROS_INFO("  INTERSECTION found - do not stop in %.2f[m]", distanceToIntersection);

@@ -7,6 +7,7 @@
     <arg name="homography_topic" default="/$(arg camera)/camera_homography"/>
     <arg name="odometry_topic" default="/visual_odom/odom"/>
     <arg name="driving_line_topic" default="/driving_line"/>
+    <arg name="detected_intersection_topic" default="/detected_intersections"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
@@ -31,6 +32,7 @@
         <arg name="homography_topic" value="$(arg homography_topic)"/>
         <arg name="odometry_topic" value="$(arg odometry_topic)"/>
         <arg name="driving_line_topic" value="$(arg driving_line_topic)"/>
+        <arg name="detected_intersection_topic" default="$(arg detected_intersection_topic)"/>
         <arg name="debug" value="$(arg debug)"/>
         <arg name="use_nodelet" value="$(arg use_nodelet)"/>
         <arg name="nodelet_manager" value="$(arg nodelet_manager)"/>

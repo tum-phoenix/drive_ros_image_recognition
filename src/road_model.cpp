@@ -473,11 +473,12 @@ void RoadModel::decreaseSegmentTtl(int index) {
 	}
 }
 
-void RoadModel::addIntersectionAt(float x, float confidence) {
-	intersections.push_back(Intersection(x, confidence));
+void RoadModel::addIntersectionAt(float x, float confidence, bool hasStopLine) {
+	intersections.push_back(Intersection(x, confidence, hasStopLine));
 }
 
-bool RoadModel::getIntersections(std::vector<cv::Point2f> &positions, std::vector<float> &confidences, Polynom &drivingLine) {
+bool RoadModel::getIntersections(std::vector<tf::Stamped<tf::Point>> &positions, std::vector<float> &confidences,
+		std::vector<bool> &hasStopLine, Polynom &drivingLine) {
 	if(intersections.empty()) {
 		return false;
 	}
@@ -533,8 +534,9 @@ bool RoadModel::getIntersections(std::vector<cv::Point2f> &positions, std::vecto
 			if(rearAxisPts.at(i).x() < .3f) {
 				intersections.at(i).confidence = -1.f;
 			} else {
-				positions.push_back(cv::Point2f(rearAxisPts.at(i).x(), rearAxisPts.at(i).y()));
+				positions.push_back(rearAxisPts.at(i));
 				confidences.push_back(intersections.at(i).confidence);
+				hasStopLine.push_back(intersections.at(i).stopLineFound);
 			}
 		}
 	} else {

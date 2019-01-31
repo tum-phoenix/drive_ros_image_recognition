@@ -57,6 +57,7 @@ private:
   ros::Subscriber homography_params_sub_;
   ros::Subscriber odometrySub;
   ros::Publisher drivingLinePub;
+  ros::Publisher detectedIntersectionsPub;
 #ifdef PUBLISH_DEBUG
   image_transport::Publisher debugImgPub_;
 #endif
@@ -109,7 +110,7 @@ private:
   Segment findLaneWithRansac(std::vector<Line*> &leftMarkings, std::vector<Line*> &midMarkings,
 		  std::vector<Line*> &rightMarkings, cv::Point2f pos, float prevAngle, bool isFirstSegment);
   bool findIntersection(float segmentAngle, cv::Point2f segStartWorld,
-		  std::vector<Line*> &verticalMarkings, float &distanceToIntersection);
+		  std::vector<Line*> &verticalMarkings, float &distanceToIntersection, bool &stopLineFound);
 
   float distanceBetweenLines(Line &a, Line &b);
   float pointToLineDistance(Line &l, const cv::Point2f &p);
