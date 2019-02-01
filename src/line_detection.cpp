@@ -299,13 +299,18 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         cv::waitKey(0);
 #endif
 
-        // DEBUG
+        // Check if the middle line is dashed
         float probMidDashed = isDashedLine(midMarkings);
         float probLeftDashed = isDashedLine(leftMarkings);
         float probRightDashed = isDashedLine(rightMarkings);
-        if((probMidDashed < probLeftDashed) || (probMidDashed < probRightDashed)) {
+
+//        ROS_INFO("  prob mid dashed = %.2f with %lu lines", probMidDashed, midMarkings.size());
+//        ROS_INFO("  prob left dashed = %.2f with %lu lines", probLeftDashed, leftMarkings.size());
+//        ROS_INFO("  prob right dashed = %.2f with %lu lines", probRightDashed, rightMarkings.size());
+
+        if(!doNotShiftLines && ((probMidDashed < probLeftDashed) || (probMidDashed < probRightDashed))) {
         	if(probMidDashed < 0.5f) {
-        		ROS_WARN("  mid line is not dashed: %.2f", isDashedLine(midMarkings));
+//        		ROS_WARN("  mid line is not dashed: %.2f", isDashedLine(midMarkings));
         		if(probRightDashed > 0.7f) {
         			ROS_INFO("  right line is probably the middle line: %.2f", isDashedLine(rightMarkings));
 
@@ -329,7 +334,7 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         			segStartWorld.y += shiftVec(1);
         			continue;
         		} else {
-        			ROS_INFO("!!! Maybe there are markings on the street?");
+//        			ROS_INFO("!!! Maybe there are markings on the street?");
         		}
         	}
         }
@@ -384,9 +389,14 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 //    ROS_INFO("  All mid markings: %.3f", isDashedLine(allMidMarkings));
 //    ROS_INFO("  All right markings: %.3f", isDashedLine(allRightMarkings));
 
+    // If there is not dashed line, we do not want to shift it in the next image
+    doNotShiftLines = (isDashedLine(allLeftMarkings) < .7f) && (isDashedLine(allMidMarkings) < .7f) && (isDashedLine(allRightMarkings) < .7f);
+
     roadModel.setOdomPointsForSegments();
     roadModel.decreaseAllSegmentTtl();
+    roadModel.buildDrivingLine();
 
+#ifdef PUBLISH_DEBUG
     // DEBUG
     std::vector<cv::Point2f> worldPts, imgPts;
     std::vector<cv::Scalar> colors;
@@ -411,6 +421,7 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
     for(int i = 0; i < imgPts.size(); i++) {
         cv::circle(debugImg_, imgPts.at(i), 5, colors.at(i), 3);
     }
+#endif
 }
 
 ///
@@ -545,8 +556,8 @@ float LineDetection::isDashedLine(std::vector<Line*> &laneMarkings) {
 	int numNotDashed = 0;
 //	ROS_INFO("  isDashedLine: num lane markings: %lu", laneMarkings.size());
 
-	if(laneMarkings.size() < 3) {
-		return .51f; // TODO: put lower bound in config1
+	if(laneMarkings.size() <= 1) {
+		return .3f; // TODO: put lower bound in config1
 	}
 
 	std::sort(laneMarkings.begin(), laneMarkings.end(), [](Line *a, Line *b){ return a->wP1_.x < b->wP1_.x; });
@@ -859,7 +870,7 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 
     	// Set lane position
     	laneMidPt = cv::Point2f(segStartWorld.x, poly.atX(segStartWorld.x));
-    	cv::Vec2f shiftVec(sin(bestAngle) * laneWidthWorld_ * .5f, cos(bestAngle) * laneWidthWorld_ * .5f);
+    	cv::Vec2f shiftVec(sin(bestAngle) * laneWidthWorld_ * -.5f, cos(bestAngle) * laneWidthWorld_ * .5f);
     	laneMidPt.x += shiftVec(0);
     	laneMidPt.y += shiftVec(1);
     	lanePosFrom = 3;
@@ -912,7 +923,6 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     	midEnd.y = poly.atX(xMax);
     	detectedLen += getDistanceBetweenPoints(midStart, midEnd);
     }
-
 
     // 6) Build the segment
     // Calculate the segment end point
@@ -994,7 +1004,7 @@ bool LineDetection::findIntersection(std::vector<cv::RotatedRect> *regions, floa
 	middleExists = midMarkings.size() > 1;
 	rightExists = rightMarkings.size() > 1;
 
-	ROS_INFO("  Left: %lu  Mid: %lu  Right: %lu", leftMarkings.size(), midMarkings.size(), rightMarkings.size());
+//	ROS_INFO("  Left: %lu  Mid: %lu  Right: %lu", leftMarkings.size(), midMarkings.size(), rightMarkings.size());
 
 	// if there think there is an intersection, we calculate the distance to it
 	if(middleExists) {
@@ -1108,7 +1118,7 @@ void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
     drawDebugLines_ = config.draw_debug;
     laneWidthWorld_ = config.lane_width;
     laneVar_ = config.lane_var;
-    lineAngle_ = config.lineAngle;
+    lineAngle_ = config.max_angle_diff / 180.f * M_PI;
     maxSenseRange_ = config.maxSenseRange;
     cannyThreshold_ = config.cannyThreshold;
     houghThresold_ = config.houghThreshold;
@@ -1120,6 +1130,9 @@ void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
     roadModel.setLaneWidth(laneWidthWorld_);
     roadModel.setDefaultPolyOrder(config.poly_order);
     roadModel.setMaxPolyErrorThresh(config.poly_error_thresh);
+    roadModel.setMaxAngleDiff(lineAngle_);
+    roadModel.setMinSegmentProb(config.min_ransac_prob);
+    roadModel.setPolyHistoryLen(config.len_poly_buffer);
 }
 
 } // namespace drive_ros_image_recognition

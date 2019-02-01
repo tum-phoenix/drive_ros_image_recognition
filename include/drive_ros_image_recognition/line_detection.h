@@ -37,8 +37,6 @@ private:
   int houghMaxLineGap_;
   float segmentLength_;
   size_t maxRansacInterations_;
-  float trajectoryDist;
-  float targetVelocity;
 
   // variables
   RoadModel roadModel;
@@ -49,6 +47,7 @@ private:
 #ifdef PUBLISH_DEBUG
   cv::Mat debugImg_;
 #endif
+  bool doNotShiftLines = false;
 
   // communication
   image_transport::ImageTransport imageTransport_;

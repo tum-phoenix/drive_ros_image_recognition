@@ -116,6 +116,9 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 	positions.clear();
 	angles.clear();
 
+	Polynom drivingLine;
+	getDrivingLine(drivingLine);
+
 	for(int i = 0; i < rearAxisPts.size(); i += 2) {
 		cv::Point2f startPt(rearAxisPts.at(i).x(),   rearAxisPts.at(i).y());
 		cv::Point2f endPt  (rearAxisPts.at(i+1).x(), rearAxisPts.at(i+1).y());
@@ -123,8 +126,21 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		if(startPt.x < 0.f) {
 //			ROS_INFO("  remove first point");
 		} else {
-			positions.push_back(startPt);
-			angles.push_back(atan2(endPt.y - startPt.y, endPt.x - startPt.x));
+			float segAngle = atan2(endPt.y - startPt.y, endPt.x - startPt.x);
+			float drivingLineAngle = atan(drivingLine.getFstDeviationAtX(startPt.x + .2f)); // use angle in mid of segment
+			float correctedAngle;
+			cv::Point2f correctedPt = startPt;
+#if 1
+			// use angle and position from poly
+			correctedPt.y = drivingLine.atX(startPt.x);
+			correctedAngle = drivingLineAngle;
+#elif
+			// use average angle and position from poly and segment
+			correctedPt.y = (startPt.y + drivingLine.atX(startPt.x)) / 2.f;
+			correctedAngle = (segAngle + drivingLineAngle) / 2.f;
+#endif
+			positions.push_back(correctedPt);
+			angles.push_back(correctedAngle);
 		}
 	}
 
@@ -132,22 +148,14 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		return;
 	}
 
-//	ROS_INFO(" *** First segment is at position (%.2f,%.2f) with angle %.f",
-//			positions.begin()->x, positions.begin()->y, angles.at(0) / M_PI * 180.f);
 	if(positions.begin()->x > .8f) {
-//		ROS_INFO(" *** Create an artificial segment at position 0");
 		// Sometimes the odometry fails and our segments move to the front, so we create a new one at the first position
-		positions.insert(positions.begin(), cv::Point2f(positions.begin()->x * .5f, positions.begin()->y * .5f));
-		angles.insert(angles.begin(), angles.at(0) * .5f);
+		cv::Point2f newFirstPt;
+		newFirstPt.x = positions.begin()->x * .5f;
+		newFirstPt.y = drivingLine.atX(newFirstPt.x);
+		positions.insert(positions.begin(), newFirstPt);
+		angles.insert(angles.begin(), drivingLine.getFstDeviationAtX(newFirstPt.x));
 		segmentsToDl.insert(segmentsToDl.begin(), Segment());
-//		ROS_INFO(" *** Now is (%.2f,%.2f) with angle %.f",
-//				positions.begin()->x, positions.begin()->y, angles.at(0) / M_PI * 180.f);
-	}
-
-//	ROS_INFO("getSegmentPositions: Returning %lu positions from %lu segments", positions.size(), odomPts.size() / 2);
-
-	if(!positions.empty()) {
-//		ROS_INFO("  first position at (%.2f, %.2f)", positions.begin()->x, positions.begin()->y);
 	}
 
 }
@@ -205,56 +213,48 @@ void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
 
 bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &possibleIntersection) {
     bool isFirstSegment = (index == 0);
+//    float angleVar = M_PI / 7.0f; // TODO move to config
     possibleIntersection = false;
 
-	if((!isFirstSegment) && (index > segmentsToDl.size())) {
-		ROS_INFO("  index > segmentsToDl.size()");
-		return false;
-	}
+    // Some basic checks
+    if(segmentToAdd->probablity < .2f) {
+    	ROS_INFO("  segments probability is too low: %.2f", segmentToAdd->probablity);
+    	return false;
+    }
+    if(segmentToAdd->length < .05f) {
+    	ROS_INFO("  segment too short: %.2f[m]", segmentToAdd->length);
+    	return false;
+    }
 
-	Segment *previousSegment = (isFirstSegment ? nullptr : &(segmentsToDl.at(index - 1)));
+    if(isFirstSegment) {
+    	// The first segment should point into the cars driving direction
+    	if(fabsf(segmentToAdd->angleTotal) > M_PI_4) {
+    		ROS_WARN("  first segments angle is too big: %.1f[deg]", segmentToAdd->angleTotal * 180.f / M_PI);
+    		return false;
+    	}
+    } else {
+    	Segment *previousSegment = &(segmentsToDl.at(index - 1));
+    	float angleDiff = fabsf(previousSegment->angleTotal - segmentToAdd->angleTotal);
+    	if(angleDiff > maxAngleDiff) {
+    		ROS_INFO_STREAM("  too much angle difference: " << (angleDiff * 180.f / M_PI) << "[deg]");
+    		if(std::abs(previousSegment->angleTotal - segmentToAdd->angleTotal) > (80.f / 180.f * M_PI)) {
+    			ROS_INFO("  Maybe found an INTERSECTION?");
+    			possibleIntersection = true;
+    		}
+    		return false;
+    	}
+    }
 
-	if(segmentToAdd->probablity < 0.2f) {
-		ROS_INFO("  segments probability is too low");
-		return false;
-	}
+    // Compare the segment to the same segment from the last step
+    if(index < segmentsToDl.size()) {
+    	Segment *segFromLastStep = &(segmentsToDl.at(index));
+    	float angleDiff = fabsf(segFromLastStep->angleTotal - segmentToAdd->angleTotal);
+    	float xDiff = segFromLastStep->positionWorld.x - segmentToAdd->positionWorld.x;
+    	float yDiff = segFromLastStep->positionWorld.y - segmentToAdd->positionWorld.y;
+    	float positionDiff = sqrtf(xDiff*xDiff + yDiff*yDiff);
 
-	if(segmentToAdd->length < 0.05f) {
-		ROS_INFO("  segment length < 0.05");
-		return false;
-	}
-
-	if(!isFirstSegment) {
-		float angleVar = M_PI / 7.0f; // TODO move to config
-		if(std::abs(previousSegment->angleTotal - segmentToAdd->angleTotal) > angleVar) {
-			ROS_INFO_STREAM("  too much angle difference: " << (segmentToAdd->angleDiff * 180.f / M_PI) << "[deg]");
-			if(std::abs(previousSegment->angleTotal - segmentToAdd->angleTotal) > (80.f / 180.f * M_PI)) {
-				ROS_INFO("  Maybe found an INTERSECTION?");
-				possibleIntersection = true;
-			}
-			return false;
-		}
-	} else {
-		// The first segment should points into the cars driving direction
-		if(std::abs(segmentToAdd->angleTotal) > M_PI / 4.0f) {
-			ROS_WARN("  first segments angle is too big: %.1f[deg]", segmentToAdd->angleTotal * 180.f / M_PI);
-			return false;
-		}
-	}
-
-    // Compare to previous polynom
-    // TODO: quick hack. think this through
-//	if(segmentsToDl.empty()) {
-//		return true;
-//	}
-//    float error = .0f;
-//    error += std::fabs(segmentToAdd->positionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->positionWorld.x));
-//    error += std::fabs(segmentToAdd->endPositionWorld.y - currentDrivingLinePoly.atX(segmentToAdd->endPositionWorld.x));
-//
-//    if(error > maxPolyError) {
-//    	ROS_INFO("  error based on polynom: %.3f", error);
-//        return false;
-//    }
+//    	ROS_INFO("  [%i] angleDiff=%.f[deg]  positionDiff=%.2f[m]", index, angleDiff, positionDiff);
+    }
 
 	return true;
 }
@@ -344,10 +344,23 @@ void RoadModel::setDefaultPolyOrder(int o) {
 	polyRangeHistory.clear();
 }
 
+void RoadModel::setPolyHistoryLen(int l) {
+	polyHistoryLen = l;
+	polyHistoryFilled = false;
+	polyHistoryIdx = 0;
+	polyHistory.clear();
+	polyRangeHistory.clear();
+}
+
 float RoadModel::getDrivingLine(Polynom &drivingLine) {
+	drivingLine = currentDrivingLinePoly;
+	return currentDetectionRange;
+}
+
+void RoadModel::buildDrivingLine() {
 	std::vector<tf::Stamped<tf::Point>> odomMidPts, rearAxisMidPts;
 
-	// 1) Convert the odom pointst to rear_axis_middle_ground
+	// 1) Convert the odom points to rear_axis_middle_ground
 	for(auto s : segmentsToDl) {
 		if(s.odomPointsSet) {
 			if(s.ttl > 0) {
@@ -378,14 +391,12 @@ float RoadModel::getDrivingLine(Polynom &drivingLine) {
 	//  ROS_INFO("Built driving line polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
 
 	if(drivingLinePts.size() < 2) {
-		// return a straight line
+		// TODO: what to do here?
 		drivingLinePts.push_back(cv::Point(.6, 0.f));
 	}
 
 	// 3) Build the polynom
-	int polyOrder = (drivingLinePts.size() > 2) ? defaultPolyOrder : 1;
-	polyOrder = defaultPolyOrder;
-	Polynom newDrivingLine = Polynom(polyOrder, drivingLinePts);
+	Polynom newDrivingLine = Polynom(defaultPolyOrder, drivingLinePts);
 	float newDetectionRange = drivingLinePts.back().x;
 
 	if(!polyHistoryFilled) {
@@ -419,7 +430,7 @@ float RoadModel::getDrivingLine(Polynom &drivingLine) {
 			avgCoeffs.at(i) = avgCoeffs.at(i) / polyHistoryLen;
 		}
 
-		// Return the poly avg
+		// Set the average polynom
 		currentDrivingLinePoly = Polynom(avgCoeffs);
 		currentDetectionRange = std::accumulate(polyRangeHistory.begin(), polyRangeHistory.end(), .0f) / polyHistoryLen;
 	}
@@ -450,8 +461,6 @@ float RoadModel::getDrivingLine(Polynom &drivingLine) {
 	}
 #endif
 
-	drivingLine = currentDrivingLinePoly;
-	return currentDetectionRange;
 }
 
 void RoadModel::decreaseAllSegmentTtl() {
@@ -509,7 +518,6 @@ bool RoadModel::getIntersections(std::vector<tf::Stamped<tf::Point>> &positions,
 				auto yDist = i->odomPosition.y() - j->odomPosition.y();
 				auto dist = sqrtf(xDist*xDist + yDist*yDist);
 				if(dist < .3f) {
-					ROS_INFO("  fuse two intersection positions");
 					i->confidence = i->confidence + .3f;
 					j->confidence = -1.f;
 				}
