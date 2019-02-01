@@ -162,8 +162,8 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     std::vector<bool> intersectionStopLines;
     bool foundIntersections = roadModel.getIntersections(intersectionPositions, intersectionConfidences,
     		intersectionStopLines, drivingLinePoly);
+    drive_ros_msgs::DetectedIntersection intersectionMsg;
     if(foundIntersections) {
-    	drive_ros_msgs::DetectedIntersection intersectionMsg;
     	intersectionMsg.header.stamp = imgTimestamp;
     	for(int i = 0; i < intersectionPositions.size(); i++) {
     		geometry_msgs::PointStamped ptStamped;
@@ -174,9 +174,8 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     	}
 
     	// Publish the message
-    	detectedIntersectionsPub.publish(intersectionMsg);
     }
-
+    detectedIntersectionsPub.publish(intersectionMsg);
 #ifdef PUBLISH_DEBUG
     std::function<void (Polynom&, cv::Scalar)> drawLaneMarking = [this, detectionRange](Polynom &poly, cv::Scalar color) {
       std::vector<cv::Point2f> worldPts, imgPts;
