@@ -97,6 +97,7 @@ class RoadModel {
 	int defaultPolyOrder = 2;
     float maxPolyError = 10.f;
     float maxAngleDiff = .7f;
+    float minSegmentProb = .1f;
 	int noNewSegmentsCtr = 0; // DEBUG
     float laneWidth;
     bool driveStraight = false;
@@ -114,8 +115,10 @@ public:
     inline void setLaneWidth(float w) { laneWidth = w; }
     inline void setMaxPolyErrorThresh(float t) { maxPolyError = t; }
     inline void setMaxAngleDiff(float d) { maxAngleDiff = d; }
+    inline void setMinSegmentProb(float p) { minSegmentProb = p; }
 
     void setDefaultPolyOrder(int o);
+    void setPolyHistoryLen(int l);
 
     void getSegmentPositions(std::vector<cv::Point2f> &positions, std::vector<float> &angles, ros::Time stamp);
     void updateSegmentAtIndex(Segment &seg, int index);

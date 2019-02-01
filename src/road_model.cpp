@@ -217,12 +217,12 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &po
     possibleIntersection = false;
 
     // Some basic checks
-    if(segmentToAdd->probablity < 0.2f) {
-    	ROS_INFO("  segments probability is too low");
+    if(segmentToAdd->probablity < .2f) {
+    	ROS_INFO("  segments probability is too low: %.2f", segmentToAdd->probablity);
     	return false;
     }
-    if(segmentToAdd->length < 0.05f) {
-    	ROS_INFO("  segment length < 0.05");
+    if(segmentToAdd->length < .05f) {
+    	ROS_INFO("  segment too short: %.2f[m]", segmentToAdd->length);
     	return false;
     }
 
@@ -344,6 +344,13 @@ void RoadModel::setDefaultPolyOrder(int o) {
 	polyRangeHistory.clear();
 }
 
+void RoadModel::setPolyHistoryLen(int l) {
+	polyHistoryLen = l;
+	polyHistoryFilled = false;
+	polyHistoryIdx = 0;
+	polyHistory.clear();
+	polyRangeHistory.clear();
+}
 
 float RoadModel::getDrivingLine(Polynom &drivingLine) {
 	drivingLine = currentDrivingLinePoly;

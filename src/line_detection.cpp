@@ -1132,6 +1132,8 @@ void LineDetection::reconfigureCB(drive_ros_image_recognition::LineDetectionConf
     roadModel.setDefaultPolyOrder(config.poly_order);
     roadModel.setMaxPolyErrorThresh(config.poly_error_thresh);
     roadModel.setMaxAngleDiff(lineAngle_);
+    roadModel.setMinSegmentProb(config.min_ransac_prob);
+    roadModel.setPolyHistoryLen(config.len_poly_buffer);
 }
 
 } // namespace drive_ros_image_recognition
