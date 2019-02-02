@@ -9,6 +9,7 @@
     <arg name="driving_line_topic" default="/driving_line"/>
     <arg name="street_marking_topic" default="/street_markings"/>
     <arg name="detected_intersection_topic" default="/detected_intersections"/>
+    <arg name="environment_model_topic" default="/environment_model" />
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
@@ -32,7 +33,8 @@
         <arg name="camera_info" value="$(arg camera_info_topic)"/>
         <arg name="homography_topic" value="$(arg homography_topic)"/>
         <arg name="odometry_topic" value="$(arg odometry_topic)"/>
-        <arg name="driving_line_topic" value="$(arg driving_line_topic)"/>
+        <arg name="environment_model_topic" value="$(arg environment_model_topic)" />
+        <arg name="driving_line_topic" value="$(arg driving_line_topic)" />
         <arg name="detected_intersection_topic" default="$(arg detected_intersection_topic)"/>
         <arg name="debug" value="$(arg debug)"/>
         <arg name="use_nodelet" value="$(arg use_nodelet)"/>

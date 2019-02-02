@@ -6,6 +6,7 @@
     <arg name="odometry_topic" default="/visual_odom/odom"/>
     <arg name="driving_line_topic" default="/driving_line"/>
     <arg name="detected_intersection_topic" default="/detected_intersections"/>
+    <arg name="environment_model_topic" default="/environment_model" />
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
     <arg name="nodelet_manager" default=""/>
@@ -25,6 +26,7 @@
             <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
             <remap from="driving_line_topic" to="$(arg driving_line_topic)"/>
+          	<remap from="environment_model_topic" to="$(arg environment_model_topic)" /> 
             <remap from="detected_intersection_topic" to="$(arg detected_intersection_topic)" />
             <remap from="debug_image" to="$(arg line_detection_debug_image_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>
@@ -42,6 +44,7 @@
             <remap from="/line_detection/odom_topic" to="$(arg odometry_topic)"/>
             <remap from="homography_in" to="$(arg homography_topic)"/>
             <remap from="driving_line_topic" to="$(arg driving_line_topic)"/>
+            <remap from="environment_model_topic" to="$(arg environment_model_topic)" />
             <remap from="detected_intersection_topic" to="$(arg detected_intersection_topic)" />
             <remap from="debug_image" to="$(arg line_detection_debug_image_topic)"/>
             <rosparam command="load" file="$(find drive_ros_image_recognition)/config/homography.yaml"/>

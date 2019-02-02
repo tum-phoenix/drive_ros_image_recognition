@@ -27,6 +27,8 @@ find_package(catkin REQUIRED COMPONENTS
     geometry_msgs
     nodelet
     tf
+    drive_ros_msgs
+    drive_ros_custom_behavior_trees
 )
 
 #include Boost for lane line processing

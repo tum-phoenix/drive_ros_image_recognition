@@ -15,6 +15,7 @@
 #include "drive_ros_msgs/simple_trajectory.h"
 #include "drive_ros_msgs/DrivingLine.h"
 #include "drive_ros_msgs/DetectedIntersection.h"
+#include "bt_node/value_definitions.h" // for sign ID definitions
 
 namespace drive_ros_image_recognition {
 
@@ -51,6 +52,9 @@ bool LineDetection::init() {
                                                              &LineDetection::homographiedImageCallback, this);
     ROS_INFO_STREAM("Subscribed homographied image transport to topic " << homographiedImageSubscriber_.getTopic());
 
+    environmentModelSub = nh_.subscribe("environment_model_topic", 3, &LineDetection::environmentModelCallback, this);
+    ROS_INFO("Subscribed to environment model on topic '%s'", environmentModelSub.getTopic().c_str());
+
     drivingLinePub = nh_.advertise<drive_ros_msgs::DrivingLine>("driving_line_topic", 1);
     ROS_INFO("Publish driving line on topic '%s'", drivingLinePub.getTopic().c_str());
 
@@ -74,6 +78,26 @@ bool LineDetection::init() {
 void LineDetection::homographiedImageCallback(const sensor_msgs::ImageConstPtr &imgIn) {
     CvImagePtr currentImage = convertImageMessage(imgIn);
     processIncomingImage(*currentImage);
+}
+
+void LineDetection::environmentModelCallback(const drive_ros_msgs::EnvironmentModelConstPtr &envModelIn) {
+	for(auto m : envModelIn->traffic_marks) {
+		switch (m.id) {
+			case SIGN_PARKING:
+//			case SIGN_EXPRESSWAY_BEGIN:
+//			case SIGN_EXPRESSWAY_END:
+			case SIGN_NO_PASSING_ZONE:
+			case SIGN_NO_PASSING_ZONE_END:
+			case SIGN_PASS_BY_ON_RIGHT:
+//			case SIGN_PASS_BY_ON_LEFT:
+//			case SIGN_STEEP_DECLINE:
+//			case SIGN_STEEP_INCLINE:
+				trafficSigns.push_back(m);
+				break;
+			default:
+				break;
+		}
+	}
 }
 
 void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
@@ -292,42 +316,61 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         cv::waitKey(0);
 #endif
 
-        // Check if the middle line is dashed
-        float probMidDashed = isDashedLine(midMarkings);
-        float probLeftDashed = isDashedLine(leftMarkings);
-        float probRightDashed = isDashedLine(rightMarkings);
+        // Check if there could be a dashed line
+        auto itNoPassingZone = std::find_if(trafficSigns.begin(), trafficSigns.end(),
+        		[](drive_ros_msgs::TrafficMarkEnvironment &tm) { return tm.id == SIGN_NO_PASSING_ZONE; });
+        if(itNoPassingZone != trafficSigns.end()) {
+        	if(itNoPassingZone->track_distance < segStartWorld.x) {
+        		doNotShiftLines = true;
+        	}
+        }
 
-//        ROS_INFO("  prob mid dashed = %.2f with %lu lines", probMidDashed, midMarkings.size());
-//        ROS_INFO("  prob left dashed = %.2f with %lu lines", probLeftDashed, leftMarkings.size());
-//        ROS_INFO("  prob right dashed = %.2f with %lu lines", probRightDashed, rightMarkings.size());
+        auto itNoPassingZoneEnd = std::find_if(trafficSigns.begin(), trafficSigns.end(),
+        		[](drive_ros_msgs::TrafficMarkEnvironment &tm) { return tm.id == SIGN_NO_PASSING_ZONE_END; });
+        if(itNoPassingZoneEnd != trafficSigns.end()) {
+        	if(itNoPassingZoneEnd->track_distance < segStartWorld.x) {
+        		doNotShiftLines = false;
+        	}
+        }
 
-        if(!doNotShiftLines && ((probMidDashed < probLeftDashed) || (probMidDashed < probRightDashed))) {
-        	if(probMidDashed < 0.5f) {
-//        		ROS_WARN("  mid line is not dashed: %.2f", isDashedLine(midMarkings));
-        		if(probRightDashed > 0.7f) {
-        			ROS_INFO("  right line is probably the middle line: %.2f", isDashedLine(rightMarkings));
+        if(!doNotShiftLines) {
+        	// Check if the middle line is dashed
+        	float probMidDashed = isDashedLine(midMarkings);
+        	float probLeftDashed = isDashedLine(leftMarkings);
+        	float probRightDashed = isDashedLine(rightMarkings);
 
-        			cv::Vec2f shiftVec(	sin(segAngle) * laneWidthWorld_,
-        					cos(segAngle) * laneWidthWorld_ * -1.f);
+        	//        ROS_INFO("  prob mid dashed = %.2f with %lu lines", probMidDashed, midMarkings.size());
+        	//        ROS_INFO("  prob left dashed = %.2f with %lu lines", probLeftDashed, leftMarkings.size());
+        	//        ROS_INFO("  prob right dashed = %.2f with %lu lines", probRightDashed, rightMarkings.size());
 
-        			useRoadModelSegment = false;
-        			i--; // redo this segment
-        			segStartWorld.x += shiftVec(0);
-        			segStartWorld.y += shiftVec(1);
-        			continue;
-        		} else if(probLeftDashed > 0.7f) {
-        			ROS_INFO("  left line is probably the middle line: %.2f", isDashedLine(leftMarkings));
+        	if(((probMidDashed < probLeftDashed) || (probMidDashed < probRightDashed))) {
+        		if(probMidDashed < 0.5f) {
+        			//        		ROS_WARN("  mid line is not dashed: %.2f", isDashedLine(midMarkings));
+        			if(probRightDashed > 0.7f) {
+        				ROS_INFO("  right line is probably the middle line: %.2f", isDashedLine(rightMarkings));
 
-        			cv::Vec2f shiftVec(	sin(segAngle) * laneWidthWorld_,
-        					cos(segAngle) * laneWidthWorld_);
+        				cv::Vec2f shiftVec(	sin(segAngle) * laneWidthWorld_,
+        						cos(segAngle) * laneWidthWorld_ * -1.f);
 
-        			useRoadModelSegment = false;
-        			i--; // redo this segment
-        			segStartWorld.x += shiftVec(0);
-        			segStartWorld.y += shiftVec(1);
-        			continue;
-        		} else {
-//        			ROS_INFO("!!! Maybe there are markings on the street?");
+        				useRoadModelSegment = false;
+        				i--; // redo this segment
+        				segStartWorld.x += shiftVec(0);
+        				segStartWorld.y += shiftVec(1);
+        				continue;
+        			} else if(probLeftDashed > 0.7f) {
+        				ROS_INFO("  left line is probably the middle line: %.2f", isDashedLine(leftMarkings));
+
+        				cv::Vec2f shiftVec(	sin(segAngle) * laneWidthWorld_,
+        						cos(segAngle) * laneWidthWorld_);
+
+        				useRoadModelSegment = false;
+        				i--; // redo this segment
+        				segStartWorld.x += shiftVec(0);
+        				segStartWorld.y += shiftVec(1);
+        				continue;
+        			} else {
+        				//        			ROS_INFO("!!! Maybe there are markings on the street?");
+        			}
         		}
         	}
         }
@@ -337,8 +380,16 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         bool intersectionBasedOnAngle;
         bool intersectionWithStopLine; // This could be a stop or yield line
 
-        // TODO: set this from within a callback
+        // if we found a "pass on right" sign, we only search for the right lane
         bool trafficIsland = false;
+        auto passOnRightIt = std::find_if(trafficSigns.begin(), trafficSigns.end(),
+        		[](drive_ros_msgs::TrafficMarkEnvironment &tm) { return tm.id == SIGN_PASS_BY_ON_RIGHT; });
+        if(passOnRightIt != trafficSigns.end()) {
+        	if(passOnRightIt->track_distance < segStartWorld.x) {
+        		trafficIsland = true;
+        	}
+        }
+
         Segment seg;
         if(trafficIsland) {
         	std::vector<Line*> emptyList;

@@ -14,6 +14,7 @@
 #include "drive_ros_image_recognition/common_image_operations.h"
 #include "drive_ros_image_recognition/LineDetectionConfig.h"
 #include "drive_ros_msgs/RoadLane.h"
+#include "drive_ros_msgs/EnvironmentModel.h"
 #include "line.h"
 #include "road_model.h"
 
@@ -47,6 +48,7 @@ private:
 #ifdef PUBLISH_DEBUG
   cv::Mat debugImg_;
 #endif
+  std::vector<drive_ros_msgs::TrafficMarkEnvironment> trafficSigns;
   bool doNotShiftLines = false;
 
   // communication
@@ -54,6 +56,7 @@ private:
   image_transport::Subscriber imageSubscriber_;
   image_transport::Subscriber homographiedImageSubscriber_;
   ros::Subscriber homography_params_sub_;
+  ros::Subscriber environmentModelSub;
   ros::Publisher drivingLinePub;
   ros::Publisher detectedIntersectionsPub;
 #ifdef PUBLISH_DEBUG
@@ -73,6 +76,7 @@ private:
   // callbacks
   void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
   void homographiedImageCallback(const sensor_msgs::ImageConstPtr &imgIn);
+  void environmentModelCallback(const drive_ros_msgs::EnvironmentModelConstPtr &envModelIn);
   void processIncomingImage(cv::Mat &homographedImg);
   void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
   dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
