@@ -99,8 +99,11 @@ class RoadModel {
     float maxAngleDiff = .7f;
     float minSegmentProb = .1f;
     float laneWidth;
+    int polyHistoryLen = 5;
 
-    PolynomAverageFilter midLineHistory = PolynomAverageFilter(defaultPolyOrder,5);
+    PolynomAverageFilter midLineHistory = PolynomAverageFilter(defaultPolyOrder, polyHistoryLen);
+    PolynomAverageFilter leftLineHistory = PolynomAverageFilter(defaultPolyOrder, polyHistoryLen);
+    PolynomAverageFilter rightLineHistory = PolynomAverageFilter(defaultPolyOrder, polyHistoryLen);
     std::vector<Intersection> intersections;
     std::vector<Segment> segmentsToDl;
 

@@ -97,29 +97,41 @@ float PolynomAverageFilter::addPolynom(Polynom &out, Polynom &in, float detectio
 		return detectionRange;
 
 	} else {
-		if(in.getOrder() == polyOrder) {
-			// Add new poly to history
-			polyHistory.at(historyIdx) = in;
-			rangeHistory.at(historyIdx) = detectionRange;
-			historyIdx++;
-			historyIdx = historyIdx % historyLen;
-		}
-
-		// Build average over poly history using the coefficients
-		std::vector<float> avgCoeffs(polyOrder+1, .0f);
-		for(auto p : polyHistory) {
-			for(int i = 0; i < p.getCoeffs().size(); i++) {
-				avgCoeffs.at(i) = avgCoeffs.at(i) + p.getCoeffs().at(i);
+		// Sometimes all coeffs are zero. TODO: Why is this happening
+		bool polyValid = false;
+		for(auto c : in.getCoeffs()) {
+			if(c != 0.f) {
+				polyValid = true;
 			}
 		}
-		for(int i = 0; i < avgCoeffs.size(); i++) {
-			avgCoeffs.at(i) = avgCoeffs.at(i) / historyLen;
+		if(!polyValid) {
+			ROS_WARN("All polynom coefficients are 0!");
+		} else {
+			if(in.getOrder() == polyOrder) {
+				// Add new poly to history
+				polyHistory.at(historyIdx) = in;
+				rangeHistory.at(historyIdx) = detectionRange;
+				historyIdx++;
+				historyIdx = historyIdx % historyLen;
+			}
 		}
-
-		// Set the average polynom
-		out = Polynom(avgCoeffs);
-		return std::accumulate(rangeHistory.begin(), rangeHistory.end(), .0f) / historyLen;
 	}
+
+	// Build average over poly history using the coefficients
+	std::vector<float> avgCoeffs(polyOrder+1, .0f);
+	for(auto p : polyHistory) {
+		for(int i = 0; i < p.getCoeffs().size(); i++) {
+			avgCoeffs.at(i) = avgCoeffs.at(i) + p.getCoeffs().at(i);
+		}
+	}
+	for(int i = 0; i < avgCoeffs.size(); i++) {
+		avgCoeffs.at(i) = avgCoeffs.at(i) / historyLen;
+	}
+
+	// Set the average polynom
+	out = Polynom(avgCoeffs);
+	return std::accumulate(rangeHistory.begin(), rangeHistory.end(), .0f) / historyLen;
+
 }
 
 void PolynomAverageFilter::setPolyOrder(int o) {
@@ -369,15 +381,16 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
     return false;
   }
 
-  // 3) Build the polynom
-  line = Polynom(defaultPolyOrder, linePts);
+  float detectionRange = std::max_element(rearAxisPts.begin(), rearAxisPts.end(),
+		  [](tf::Stamped<tf::Point> &a, tf::Stamped<tf::Point>&b) { return a.x() < b.x(); } )->x();
 
-  // Sometimes all coeffs are zero. TODO: Why is this happening
-  bool polyValid = false;
-  for(auto c : line.getCoeffs()) {
-	  if(c != 0.f) {
-		  polyValid = true;
-	  }
+  // 3) Build the polynom
+  Polynom linePoly(defaultPolyOrder, linePts);
+
+  if(leftLine) {
+	  leftLineHistory.addPolynom(line, linePoly, detectionRange);
+  } else {
+	  rightLineHistory.addPolynom(line, linePoly, detectionRange);
   }
 
 //  ROS_INFO("  Built %s line from %lu points with limits [%.2f, %.2f]",
@@ -385,16 +398,21 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
 //		  std::min_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x,
 //		  std::max_element(linePts.begin(), linePts.end(), [](cv::Point2f &a, cv::Point2f &b) { return a.x < b.x; })->x);
 
-  return polyValid;
+  return true;
 }
 
 void RoadModel::setDefaultPolyOrder(int o) {
 	defaultPolyOrder = o;
 	midLineHistory.setPolyOrder(o);
+	leftLineHistory.setPolyOrder(o);
+	rightLineHistory.setPolyOrder(o);
 }
 
 void RoadModel::setPolyHistoryLen(int l) {
+	polyHistoryLen = l;
 	midLineHistory.setHistoryLength(l);
+	leftLineHistory.setHistoryLength(l);
+	rightLineHistory.setHistoryLength(l);
 }
 
 float RoadModel::getDrivingLine(Polynom &drivingLine) {
