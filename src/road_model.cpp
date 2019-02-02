@@ -12,7 +12,6 @@ bool transformOdomToRearAxis(
 
 	try {
 		pTfListener->transformPoint("/rear_axis_middle_ground", ros::Time(0), odomPt, "/odom", rearAxisPt);
-		//("/rear_axis_middle_ground", odomPt, rearAxisPt);
 	} catch (tf::TransformException &ex){
 		ROS_ERROR("transformOdomToRearAxis: %s",ex.what());
 		return false;
@@ -31,18 +30,6 @@ bool transformOdomPointsToRearAxis(
 	for(int i = 0; i < odomPts.size(); i++) {
 		if(!transformOdomToRearAxis(pTfListener, odomPts.at(i), rearAxisPts.at(i)))
 			return false;
-
-//		if(pTfListener->waitForTransform("/rear_axis_middle_ground", "/odom", stamp, ros::Duration(0.1))) {
-//			try {
-//				pTfListener->transformPoint("/rear_axis_middle_ground", odomPts.at(i), rearAxisPts.at(i));
-//			} catch (tf::TransformException &ex) {
-//				ROS_ERROR("%s",ex.what());
-//				continue;
-//			}
-//		} else {
-//			ROS_ERROR("waitForTransform timed out in RoadModel::addSegments");
-//			return false;
-//		}
 	}
 
 	return true;

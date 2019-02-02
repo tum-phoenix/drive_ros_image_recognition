@@ -126,8 +126,8 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     drive_ros_msgs::DrivingLine drivingLineMsg;
     Polynom drivingLinePoly, leftLinePoly, rightLinePoly;
     float detectionRange = roadModel.getDrivingLine(drivingLinePoly);
-    bool leftLineFound = roadModel.getLaneMarkings(leftLinePoly, true);
-    bool rightLineFound = roadModel.getLaneMarkings(rightLinePoly, false);
+    bool leftLineFound = roadModel.getLeftLaneMarking(leftLinePoly);
+    bool rightLineFound = roadModel.getRightLaneMarking(rightLinePoly);
 
     drivingLineMsg.detectionRange = detectionRange;
     drivingLineMsg.polynom_order = drivingLinePoly.getOrder();
@@ -409,19 +409,9 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
 #ifdef PUBLISH_DEBUG
     // DEBUG
     std::vector<cv::Point2f> worldPts, imgPts;
-    std::vector<cv::Scalar> colors;
     std::vector<float> angles;
 
     roadModel.getSegmentPositions(worldPts, angles, ros::Time(0));
-    for(auto s : roadModel.segmentsToDl)  {
-        if(s.ttl == 3) {
-            colors.push_back(cv::Scalar(0,0,255));
-        } else if(s.ttl > 0){
-            colors.push_back(cv::Scalar(255));
-        } else {
-            colors.push_back(cv::Scalar(0,0,0));
-        }
-    }
 
     if (worldPts.size() > 0)
         image_operator_.worldToWarpedImg(worldPts, imgPts);
@@ -429,7 +419,7 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         ROS_WARN("[Line Detection] No segment points found in image!");
 
     for(int i = 0; i < imgPts.size(); i++) {
-        cv::circle(debugImg_, imgPts.at(i), 5, colors.at(i), 3);
+        cv::circle(debugImg_, imgPts.at(i), 5, cv::Scalar(0,0,255), 3);
     }
 #endif
 }
@@ -676,7 +666,6 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     float bestScore = 0.f;
     Line *bestLine;
     cv::Point2f laneMidPt = segStartWorld;
-    cv::Point2f bestLeft, bestMid, bestRight;
     size_t numLines = leftMarkings.size() + midMarkings.size() + rightMarkings.size();
     size_t iteration = 0;
     std::vector<cv::Point2f> worldPts, imgPts;
@@ -685,7 +674,7 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
 
     if(numLines == 0) {
         ROS_WARN("  no lines for Ransac");
-        return Segment(segStartWorld, imgPts.at(0), 0.f, prevAngle, segmentLength_, 0.f);
+        return Segment(segStartWorld, imgPts.at(0), prevAngle, segmentLength_, 0.f);
     }
 
     std::default_random_engine generator;
@@ -947,21 +936,12 @@ Segment LineDetection::findLaneWithRansac(std::vector<Line*> &leftMarkings,
     worldPts.clear();
     imgPts.clear();
     worldPts.push_back(laneMidPt); // idx 0
-    worldPts.push_back(bestLeft); // idx 1
-    worldPts.push_back(bestMid); // idx 2
-    worldPts.push_back(bestRight); // idx 3
-    worldPts.push_back(segEndWorld); // idx 4
+    worldPts.push_back(segEndWorld); // idx 1
     image_operator_.worldToWarpedImg(worldPts, imgPts);
 
     // Create the segment
-    Segment s(laneMidPt, imgPts.at(0), prevAngle - bestAngle, bestAngle, segmentLen, bestScore);
-    s.leftPosW = bestLeft;
-    s.midPosW = bestMid;
-    s.rightPosW = bestRight;
-    s.leftPosI = imgPts.at(1);
-    s.midPosI = imgPts.at(2);
-    s.rightPosI = imgPts.at(3);
-    s.endPositionImage = imgPts.at(4);
+    Segment s(laneMidPt, imgPts.at(0), bestAngle, segmentLen, bestScore);
+    s.endPositionImage = imgPts.at(1);
     s.endPositionWorld = segEndWorld;
     s.leftLineSet = leftLineFound;
     if(leftLineFound) {

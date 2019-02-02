@@ -9,32 +9,24 @@
 
 namespace drive_ros_image_recognition {
 
-enum SegmentType {
-	NORMAL_ROAD, INTERSECTION_STOP, INTERSECTION_GO_STRAIGHT
-};
-
 bool transformOdomPointsToRearAxis(
 		tf::TransformListener *pTfListener,
 		std::vector<tf::Stamped<tf::Point>> &odomPts,
-    std::vector<tf::Stamped<tf::Point>> &rearAxisPts);
+		std::vector<tf::Stamped<tf::Point>> &rearAxisPts);
 
 bool transformRearAxisPointsToOdom(
 		tf::TransformListener *pTfListener,
 		std::vector<cv::Point2f> &rearAxisPts,
-    std::vector<tf::Stamped<tf::Point>> &odomPts);
+		std::vector<tf::Stamped<tf::Point>> &odomPts);
 
 struct Segment {
     cv::Point2f positionWorld;
     cv::Point2f positionImage;
     cv::Point2f endPositionWorld, endPositionImage;
     cv::Point2f leftLineStart, leftLineEnd, rightLineStart, rightLineEnd;
-    cv::Point2f leftPosW, midPosW, rightPosW; // These points lay on the left/mid/right line marking
-    cv::Point2f leftPosI, midPosI, rightPosI;
-    float angleDiff; // The angle difference to the previous segment
     float angleTotal; // The angle in which the lane is heading to
     float length; // Length of the segment in world coordinates [m]
     float probablity; // The probability of this segment
-    SegmentType segmentType = SegmentType::NORMAL_ROAD;
     int ttl = 4;
     bool leftLineSet = false, rightLineSet = false;
 
@@ -50,20 +42,15 @@ struct Segment {
     {
     }
 
-    Segment(cv::Point2f worldPos, cv::Point2f imagePos, float angleDiff_, float angleTotal_, float len, float prob)
+    Segment(cv::Point2f worldPos, cv::Point2f imagePos, float angleTotal_, float len, float prob)
         : positionWorld(worldPos)
         , positionImage(imagePos)
-        , angleDiff(angleDiff_)
         , angleTotal(angleTotal_)
         , length(len)
         , probablity(prob)
     {
     }
 
-    inline bool isIntersection() const { return
-    		segmentType == SegmentType::INTERSECTION_GO_STRAIGHT ||
-			segmentType == SegmentType::INTERSECTION_STOP;
-    }
 };
 
 struct Intersection {
@@ -98,10 +85,12 @@ class RoadModel {
     float maxPolyError = 10.f;
     float maxAngleDiff = .7f;
     float minSegmentProb = .1f;
-	int noNewSegmentsCtr = 0; // DEBUG
     float laneWidth;
-    bool driveStraight = false;
+
     std::vector<Intersection> intersections;
+    std::vector<Segment> segmentsToDl;
+
+    bool getLaneMarkings(Polynom &line, bool leftLine);
 
 public:
     RoadModel(tf::TransformListener *tfListener, float laneWidth_)
@@ -109,8 +98,6 @@ public:
         , laneWidth(laneWidth_)
 	{
 	}
-
-    std::vector<Segment> segmentsToDl; // TODO: make private again
 
     inline void setLaneWidth(float w) { laneWidth = w; }
     inline void setMaxPolyErrorThresh(float t) { maxPolyError = t; }
@@ -133,7 +120,9 @@ public:
     bool segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &possibleIntersection);
     void buildDrivingLine();
     float getDrivingLine(Polynom &drivingLine);
-    bool getLaneMarkings(Polynom &line, bool leftLine);
+    inline bool getLeftLaneMarking(Polynom &line) { return getLaneMarkings(line, true); }
+    inline bool getRightLaneMarking(Polynom &line) { return getLaneMarkings(line, false); }
+
 };
 
 } // namespace drive_ros_image_recognition
