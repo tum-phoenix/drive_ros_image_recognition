@@ -51,9 +51,6 @@ bool LineDetection::init() {
                                                              &LineDetection::homographiedImageCallback, this);
     ROS_INFO_STREAM("Subscribed homographied image transport to topic " << homographiedImageSubscriber_.getTopic());
 
-    odometrySub = pnh_.subscribe("odom_topic", 3, &LineDetection::odometryCallback, this);
-    ROS_INFO("Subscribing to odometry on topic '%s'", odometrySub.getTopic().c_str());
-
     drivingLinePub = nh_.advertise<drive_ros_msgs::DrivingLine>("driving_line_topic", 1);
     ROS_INFO("Publish driving line on topic '%s'", drivingLinePub.getTopic().c_str());
 
@@ -72,10 +69,6 @@ bool LineDetection::init() {
     }
 
     return true;
-}
-
-void LineDetection::odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg) {
-	latestOdometry = *odomMsg;
 }
 
 void LineDetection::homographiedImageCallback(const sensor_msgs::ImageConstPtr &imgIn) {

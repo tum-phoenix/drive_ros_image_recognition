@@ -3,16 +3,16 @@
 
 #include <ros/ros.h>
 #include <sensor_msgs/image_encodings.h>
-#include <nav_msgs/Odometry.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include <dynamic_reconfigure/server.h>
-#include <drive_ros_image_recognition/common_image_operations.h>
-#include <drive_ros_image_recognition/LineDetectionConfig.h>
 #include <nodelet/nodelet.h>
 #include <tf/transform_listener.h>
+
+#include "drive_ros_image_recognition/common_image_operations.h"
+#include "drive_ros_image_recognition/LineDetectionConfig.h"
 #include "drive_ros_msgs/RoadLane.h"
 #include "line.h"
 #include "road_model.h"
@@ -54,7 +54,6 @@ private:
   image_transport::Subscriber imageSubscriber_;
   image_transport::Subscriber homographiedImageSubscriber_;
   ros::Subscriber homography_params_sub_;
-  ros::Subscriber odometrySub;
   ros::Publisher drivingLinePub;
   ros::Publisher detectedIntersectionsPub;
 #ifdef PUBLISH_DEBUG
@@ -69,20 +68,12 @@ private:
   cv::Size transformed_size_;
   bool homog_received_;
 
-  // odometry components
   tf::TransformListener tfListener_;
-  cv::Point2f oldPoint_;
-  nav_msgs::Odometry lastUsedOdometry;
-  nav_msgs::Odometry latestOdometry;
-  bool odometryInitialized = false;
-
-  cv::Mat prevPolyCoeff;
 
   // callbacks
   void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);
   void homographiedImageCallback(const sensor_msgs::ImageConstPtr &imgIn);
   void processIncomingImage(cv::Mat &homographedImg);
-  void odometryCallback(const nav_msgs::OdometryConstPtr &odomMsg);
   void reconfigureCB(drive_ros_image_recognition::LineDetectionConfig& config, uint32_t level);
   dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig> dsrv_server_;
   dynamic_reconfigure::Server<drive_ros_image_recognition::LineDetectionConfig>::CallbackType dsrv_cb_;
