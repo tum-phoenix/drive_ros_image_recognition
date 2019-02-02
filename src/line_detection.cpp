@@ -343,7 +343,17 @@ void LineDetection::findLaneMarkings(std::vector<Line> &lines) {
         float intersectionDistanceLines, intersectionDistanceBasedOnAngle;
         bool intersectionBasedOnAngle;
         bool intersectionWithStopLine; // This could be a stop or yield line
-        auto seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle, i == 0);
+
+        // TODO: set this from within a callback
+        bool trafficIsland = false;
+        Segment seg;
+        if(trafficIsland) {
+        	std::vector<Line*> emptyList;
+        	seg = findLaneWithRansac(emptyList, midMarkings, rightMarkings, segStartWorld, segAngle, i == 0);
+        } else {
+        	seg = findLaneWithRansac(leftMarkings, midMarkings, rightMarkings, segStartWorld, segAngle, i == 0);
+        }
+
         bool intersectionBasedOnLines = findIntersection(&intersectionRegions, segAngle, segStartWorld,
         		verticalMarkings, intersectionDistanceLines, intersectionWithStopLine);
 
