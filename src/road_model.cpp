@@ -73,9 +73,74 @@ bool transformRearAxisPointsToOdom(
 	return true;
 }
 
-/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
- * 					ROAD MODEL
- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+// ============================================================
+//				PolynomAverageFilter
+// ============================================================
+
+float PolynomAverageFilter::addPolynom(Polynom &out, Polynom &in, float detectionRange) {
+	if(!historyFilled) {
+		if(in.getOrder() != polyOrder) {
+			// if we do not have a filled history and the order does not match, return the input polynom
+			out = in;
+			return detectionRange;
+		}
+
+		polyHistory.push_back(in);
+		rangeHistory.push_back(detectionRange);
+
+		if(polyHistory.size() == historyLen) {
+			historyFilled = true;
+		}
+
+		// For now we return the current poly
+		out = in;
+		return detectionRange;
+
+	} else {
+		if(in.getOrder() == polyOrder) {
+			// Add new poly to history
+			polyHistory.at(historyIdx) = in;
+			rangeHistory.at(historyIdx) = detectionRange;
+			historyIdx++;
+			historyIdx = historyIdx % historyLen;
+		}
+
+		// Build average over poly history using the coefficients
+		std::vector<float> avgCoeffs(polyOrder+1, .0f);
+		for(auto p : polyHistory) {
+			for(int i = 0; i < p.getCoeffs().size(); i++) {
+				avgCoeffs.at(i) = avgCoeffs.at(i) + p.getCoeffs().at(i);
+			}
+		}
+		for(int i = 0; i < avgCoeffs.size(); i++) {
+			avgCoeffs.at(i) = avgCoeffs.at(i) / historyLen;
+		}
+
+		// Set the average polynom
+		out = Polynom(avgCoeffs);
+		return std::accumulate(rangeHistory.begin(), rangeHistory.end(), .0f) / historyLen;
+	}
+}
+
+void PolynomAverageFilter::setPolyOrder(int o) {
+	polyOrder = o;
+	historyFilled = false;
+	historyIdx = 0;
+	polyHistory.clear();
+	rangeHistory.clear();
+}
+
+void PolynomAverageFilter::setHistoryLength(int l) {
+	historyLen = l;
+	historyFilled = false;
+	historyIdx = 0;
+	polyHistory.clear();
+	rangeHistory.clear();
+}
+
+// ============================================================
+// 					RoadModel
+// ============================================================
 
 void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::vector<float> &angles, ros::Time stamp) {
 	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
@@ -325,18 +390,11 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
 
 void RoadModel::setDefaultPolyOrder(int o) {
 	defaultPolyOrder = o;
-	polyHistoryFilled = false;
-	polyHistoryIdx = 0;
-	polyHistory.clear();
-	polyRangeHistory.clear();
+	midLineHistory.setPolyOrder(o);
 }
 
 void RoadModel::setPolyHistoryLen(int l) {
-	polyHistoryLen = l;
-	polyHistoryFilled = false;
-	polyHistoryIdx = 0;
-	polyHistory.clear();
-	polyRangeHistory.clear();
+	midLineHistory.setHistoryLength(l);
 }
 
 float RoadModel::getDrivingLine(Polynom &drivingLine) {
@@ -386,41 +444,7 @@ void RoadModel::buildDrivingLine() {
 	Polynom newDrivingLine = Polynom(defaultPolyOrder, drivingLinePts);
 	float newDetectionRange = drivingLinePts.back().x;
 
-	if(!polyHistoryFilled) {
-		polyHistory.push_back(newDrivingLine);
-		polyRangeHistory.push_back(newDetectionRange);
-
-		// For now we return the current poly
-		currentDrivingLinePoly = newDrivingLine;
-		currentDetectionRange = newDetectionRange;
-
-		if(polyHistory.size() == polyHistoryLen) {
-			polyHistoryFilled = true;
-		}
-	} else {
-		if(newDrivingLine.getOrder() == defaultPolyOrder) {
-			// Add new poly to history
-			polyHistory.at(polyHistoryIdx) = newDrivingLine;
-			polyRangeHistory.at(polyHistoryIdx) = newDetectionRange;
-			polyHistoryIdx++;
-			polyHistoryIdx = polyHistoryIdx % polyHistoryLen;
-		}
-
-		// Build average over poly history using the coefficients
-		std::vector<float> avgCoeffs(defaultPolyOrder+1, .0f);
-		for(auto p : polyHistory) {
-			for(int i = 0; i < p.getCoeffs().size(); i++) {
-				avgCoeffs.at(i) = avgCoeffs.at(i) + p.getCoeffs().at(i);
-			}
-		}
-		for(int i = 0; i < avgCoeffs.size(); i++) {
-			avgCoeffs.at(i) = avgCoeffs.at(i) / polyHistoryLen;
-		}
-
-		// Set the average polynom
-		currentDrivingLinePoly = Polynom(avgCoeffs);
-		currentDetectionRange = std::accumulate(polyRangeHistory.begin(), polyRangeHistory.end(), .0f) / polyHistoryLen;
-	}
+	currentDetectionRange = midLineHistory.addPolynom(currentDrivingLinePoly, newDrivingLine, newDetectionRange);
 
 #if 0
 	if(newDetectionRange > .05f) {

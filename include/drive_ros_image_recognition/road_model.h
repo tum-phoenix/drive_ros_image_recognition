@@ -68,25 +68,39 @@ struct Intersection {
 	}
 };
 
+class PolynomAverageFilter {
+	std::vector<Polynom> polyHistory;
+	std::vector<float> rangeHistory;
+	bool historyFilled = false;
+	int historyIdx = 0;
+	int polyOrder;
+	int historyLen;
+
+public:
+	PolynomAverageFilter(int polynomOrder, int historyLength)
+	: polyOrder(polynomOrder)
+	, historyLen(historyLength)
+	{
+	}
+
+	float addPolynom(Polynom &out, Polynom &in, float detectionRange);
+	void setPolyOrder(int o);
+	void setHistoryLength(int l);
+};
+
 class RoadModel {
 	tf::TransformListener *pTfListener;
 
-	int polyHistoryLen = 5;
-	int polyHistoryIdx = 0;
-	std::vector<Polynom> polyHistory;
-	std::vector<float> polyRangeHistory;
-	bool polyHistoryFilled = false;
-
     Polynom currentDrivingLinePoly;
     float currentDetectionRange = .0f;
-    int currentPolyAge = 0;
 
-	int defaultPolyOrder = 2;
+	int defaultPolyOrder = 3;
     float maxPolyError = 10.f;
     float maxAngleDiff = .7f;
     float minSegmentProb = .1f;
     float laneWidth;
 
+    PolynomAverageFilter midLineHistory = PolynomAverageFilter(defaultPolyOrder,5);
     std::vector<Intersection> intersections;
     std::vector<Segment> segmentsToDl;
 
