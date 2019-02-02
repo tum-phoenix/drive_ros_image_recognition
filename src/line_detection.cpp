@@ -153,7 +153,7 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
         drivingLineMsg.right_poly_params.push_back(c);
       }
     }
-
+    drivingLineMsg.header.stamp = imgTimestamp;
     drivingLinePub.publish(drivingLineMsg);
 
     // Check if we found an intersection
@@ -163,8 +163,8 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     bool foundIntersections = roadModel.getIntersections(intersectionPositions, intersectionConfidences,
     		intersectionStopLines, drivingLinePoly);
     drive_ros_msgs::DetectedIntersection intersectionMsg;
+    intersectionMsg.header.stamp = imgTimestamp;
     if(foundIntersections) {
-    	intersectionMsg.header.stamp = imgTimestamp;
     	for(int i = 0; i < intersectionPositions.size(); i++) {
     		geometry_msgs::PointStamped ptStamped;
     		tf::pointStampedTFToMsg(intersectionPositions.at(i), ptStamped);

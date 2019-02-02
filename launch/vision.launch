@@ -7,6 +7,7 @@
     <arg name="homography_topic" default="/$(arg camera)/camera_homography"/>
     <arg name="odometry_topic" default="/visual_odom/odom"/>
     <arg name="driving_line_topic" default="/driving_line"/>
+    <arg name="street_marking_topic" default="/street_markings"/>
     <arg name="detected_intersection_topic" default="/detected_intersections"/>
     <arg name="debug" default="false"/>
     <arg name="use_nodelet" default="false"/>
@@ -38,5 +39,12 @@
         <arg name="nodelet_manager" value="$(arg nodelet_manager)"/>
         <arg name="line_detection_debug_image_topic" default="$(arg line_detection_debug_image_topic)"/>
         <arg name="output" value="$(arg output)"/>
+    </include>
+
+    <include file="$(find drive_ros_street_marking_detection)/launch/street_marking_detection.launch">
+        <arg name="incoming_homographied_image" value="$(arg warped_image_topic)" />
+        <arg name="street_marking_topic" value="$(arg street_marking_topic)" />
+        <arg name="camera_info" default="$(arg camera_info_topic)"/>
+        <arg name="homography_topic" default="$(arg homography_topic)"/>
     </include>
 </launch>
