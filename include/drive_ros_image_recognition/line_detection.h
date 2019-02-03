@@ -9,7 +9,8 @@
 #include <image_transport/image_transport.h>
 #include <dynamic_reconfigure/server.h>
 #include <nodelet/nodelet.h>
-#include <tf/transform_listener.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 #include "drive_ros_image_recognition/common_image_operations.h"
 #include "drive_ros_image_recognition/LineDetectionConfig.h"
@@ -71,7 +72,9 @@ private:
   cv::Size transformed_size_;
   bool homog_received_;
 
-  tf::TransformListener tfListener_;
+//  tf::TransformListener tfListener_;
+  tf2_ros::Buffer tfBuffer;
+  tf2_ros::TransformListener tfListener;
 
   // callbacks
   void imageCallback(const sensor_msgs::ImageConstPtr& imageIn);

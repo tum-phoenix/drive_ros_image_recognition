@@ -49,9 +49,13 @@
   <build_depend>dynamic_reconfigure</build_depend>
   <build_depend>nodelet</build_depend>
   <build_depend>geometry_msgs</build_depend>
+  <build_depend>tf2</build_depend>
   <build_depend>tf</build_depend>
+  <build_depend>tf2_ros</build_depend>
   <build_depend>drive_ros_msgs</build_depend>
   <build_depend>drive_ros_custom_behavior_trees</build_depend>
+  <build_depend>tf2_geometry_msgs</build_depend>
+  <build_depend>roscpp</build_depend>
 
   <run_depend>cv_bridge</run_depend>
   <run_depend>image_transport</run_depend>
@@ -63,7 +67,10 @@
   <run_depend>nodelet</run_depend>
   <run_depend>geometry_msgs</run_depend>
   <run_depend>tf</run_depend>
+  <run_depend>tf2</run_depend>
+  <run_depend>tf2_ros</run_depend>
   <run_depend>drive_ros_msgs</run_depend>
+  <run_depend>tf2_geometry_msgs</run_depend>
 
   <export>
     <nodelet plugin="${prefix}/nodelets.xml" />

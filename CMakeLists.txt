@@ -4,14 +4,8 @@ project(drive_ros_image_recognition)
 #SET(CMAKE_BUILD_TYPE Release)
 SET(CMAKE_BUILD_TYPE Debug)
 
-# enable to compile with OpenCV window displays
-#add_definitions(-DDRAW_DEBUG)
 # enable to compile with publishers of internally processed images
 add_definitions(-DPUBLISH_DEBUG)
-# enable to use World2Cam homography
-#add_definitions(-DUSE_WORLD2CAM_HOMOGRAPHY)
-# enable publishing of detected points (for rviz display)
-#add_definitions(-DPUBLISH_WORLD_POINTS)
 
 add_definitions(-std=c++11)
 
@@ -27,8 +21,11 @@ find_package(catkin REQUIRED COMPONENTS
     geometry_msgs
     nodelet
     tf
+    tf2
+    tf2_ros
     drive_ros_msgs
     drive_ros_custom_behavior_trees
+    tf2_geometry_msgs
 )
 
 #include Boost for lane line processing
@@ -40,7 +37,8 @@ generate_dynamic_reconfigure_options(
 
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS cv_bridge image_transport roscpp sensor_msgs std_msgs drive_ros_msgs image_geometry tf
+  CATKIN_DEPENDS cv_bridge image_transport roscpp sensor_msgs std_msgs drive_ros_msgs image_geometry 
+  tf2 tf2_ros tf2_geometry_msgs tf
 )
 
 find_package(OpenCV REQUIRED)

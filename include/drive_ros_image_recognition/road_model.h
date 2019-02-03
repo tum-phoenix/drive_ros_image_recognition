@@ -1,23 +1,16 @@
 #ifndef ROAD_MODEL_H
 #define ROAD_MODEL_H
 
+#include <tf2_ros/transform_listener.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+#include <tf2/buffer_core.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include "drive_ros_image_recognition/polynom.hpp"
 #include "drive_ros_image_recognition/line.h"
 #include "drive_ros_image_recognition/common_image_operations.h"
 
 namespace drive_ros_image_recognition {
-
-bool transformOdomPointsToRearAxis(
-		tf::TransformListener *pTfListener,
-		std::vector<tf::Stamped<tf::Point>> &odomPts,
-		std::vector<tf::Stamped<tf::Point>> &rearAxisPts);
-
-bool transformRearAxisPointsToOdom(
-		tf::TransformListener *pTfListener,
-		std::vector<cv::Point2f> &rearAxisPts,
-		std::vector<tf::Stamped<tf::Point>> &odomPts);
 
 struct Segment {
     cv::Point2f positionWorld;
@@ -31,9 +24,9 @@ struct Segment {
     bool leftLineSet = false, rightLineSet = false;
 
     // Values for use with odometry
-    tf::Stamped<tf::Point> odomPosition, odomStart, odomEnd;
-    tf::Stamped<tf::Point> odomLeftLineStart, odomLeftLineEnd;
-    tf::Stamped<tf::Point> odomRightLineStart, odomRightLineEnd;
+    geometry_msgs::PointStamped odomPosition, odomStart, odomEnd;
+    geometry_msgs::PointStamped odomLeftLineStart, odomLeftLineEnd;
+    geometry_msgs::PointStamped odomRightLineStart, odomRightLineEnd;
     ros::Time creationTimestamp;
     bool odomPointsSet = false;
 
@@ -57,7 +50,7 @@ struct Intersection {
 	float distanceTo;
 	float confidence;
 	bool stopLineFound;
-	tf::Stamped<tf::Point> odomPosition;
+	geometry_msgs::PointStamped odomPosition;
 	bool odomSet = false;
 
 	Intersection(float dist, float conf, bool hasStopLine)
@@ -89,7 +82,8 @@ public:
 };
 
 class RoadModel {
-	tf::TransformListener *pTfListener;
+	tf2_ros::Buffer *pTfBuffer;
+	std::string staticFrame, movingFrame;
 
     Polynom currentDrivingLinePoly;
     float currentDetectionRange = .0f;
@@ -109,12 +103,35 @@ class RoadModel {
 
     bool getLaneMarkings(Polynom &line, bool leftLine);
 
+    bool transformRearAxisToOdom(
+    		tf2_ros::Buffer *pTfBuffer,
+    		geometry_msgs::PointStamped &rearAxisPt,
+    		geometry_msgs::PointStamped &odomPt);
+
+    bool transformRearAxisPointsToOdom(
+    		tf2_ros::Buffer *pTfBuffer,
+			std::vector<cv::Point2f> &rearAxisPts,
+			std::vector<geometry_msgs::PointStamped> &odomPts);
+
+    bool transformOdomToRearAxis(
+    		tf2_ros::Buffer *pTfBuffer,
+    		geometry_msgs::PointStamped &odomPt,
+    		geometry_msgs::PointStamped &rearAxisPt);
+
+    bool transformOdomPointsToRearAxis(
+    		tf2_ros::Buffer *pTfBuffer,
+    		std::vector<geometry_msgs::PointStamped> &odomPts,
+    		std::vector<geometry_msgs::PointStamped> &rearAxisPts);
+
+
 public:
-    RoadModel(tf::TransformListener *tfListener, float laneWidth_)
-		: pTfListener(tfListener)
-        , laneWidth(laneWidth_)
-	{
-	}
+    RoadModel(tf2_ros::Buffer *tfBuffer, float laneWidth_, const ros::NodeHandle &pnh)
+		: pTfBuffer(tfBuffer)
+		, laneWidth(laneWidth_)
+    {
+    	pnh.param<std::string>("static_frame", staticFrame, "odom");
+    	pnh.param<std::string>("moving_frame", movingFrame, "rear_axis_middle_ground");
+    }
 
     inline void setLaneWidth(float w) { laneWidth = w; }
     inline void setMaxPolyErrorThresh(float t) { maxPolyError = t; }
@@ -131,7 +148,7 @@ public:
     void decreaseSegmentTtl(int index);
 
     void addIntersectionAt(float x, float confidence, bool hasStopLine);
-    bool getIntersections(std::vector<tf::Stamped<tf::Point>> &positions, std::vector<float> &confidences,
+    bool getIntersections(std::vector<geometry_msgs::PointStamped> &positions, std::vector<float> &confidences,
     		std::vector<bool> &hasStopLine, Polynom &drivingLine);
 
     bool segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &possibleIntersection);

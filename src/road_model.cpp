@@ -1,47 +1,49 @@
 #include <ros/ros.h>
+#include "tf2_ros/transform_listener.h"
+#include <tf2_ros/message_filter.h>
 #include "drive_ros_image_recognition/road_model.h"
 
 namespace drive_ros_image_recognition {
 
 
-bool transformOdomToRearAxis(
-		tf::TransformListener *pTfListener,
-		tf::Stamped<tf::Point> &odomPt,
-		tf::Stamped<tf::Point> &rearAxisPt)
+bool RoadModel::transformOdomToRearAxis(
+		tf2_ros::Buffer *pTfBuffer,
+		geometry_msgs::PointStamped &odomPt,
+		geometry_msgs::PointStamped &rearAxisPt)
 {
 
 	try {
-		pTfListener->transformPoint("/rear_axis_middle_ground", ros::Time(0), odomPt, "/odom", rearAxisPt);
-	} catch (tf::TransformException &ex){
+		pTfBuffer->transform(odomPt, rearAxisPt, movingFrame);
+	} catch (tf2::TransformException &ex){
 		ROS_ERROR("transformOdomToRearAxis: %s",ex.what());
 		return false;
 	}
 	return true;
 }
 
-bool transformOdomPointsToRearAxis(
-		tf::TransformListener *pTfListener,
-		std::vector<tf::Stamped<tf::Point>> &odomPts,
-    std::vector<tf::Stamped<tf::Point>> &rearAxisPts)
+bool RoadModel::transformOdomPointsToRearAxis(
+		tf2_ros::Buffer *pTfBuffer,
+		std::vector<geometry_msgs::PointStamped> &odomPts,
+		std::vector<geometry_msgs::PointStamped> &rearAxisPts)
 {
 
 	rearAxisPts.resize(odomPts.size());
 
 	for(int i = 0; i < odomPts.size(); i++) {
-		if(!transformOdomToRearAxis(pTfListener, odomPts.at(i), rearAxisPts.at(i)))
+		if(!transformOdomToRearAxis(pTfBuffer, odomPts.at(i), rearAxisPts.at(i)))
 			return false;
 	}
 
 	return true;
 }
 
-bool transformRearAxisToOdom(
-		tf::TransformListener *pTfListener,
-		tf::Stamped<tf::Point> &rearAxisPt,
-		tf::Stamped<tf::Point> &odomPt)
+bool RoadModel::transformRearAxisToOdom(
+		tf2_ros::Buffer *pTfBuffer,
+		geometry_msgs::PointStamped &rearAxisPt,
+		geometry_msgs::PointStamped &odomPt)
 {
 	try {
-		pTfListener->transformPoint("/odom", rearAxisPt, odomPt);
+		pTfBuffer->transform(rearAxisPt, odomPt, staticFrame);
 	} catch (tf::TransformException &ex){
 		ROS_ERROR("transformRearAxisToOdom: %s",ex.what());
 		return false;
@@ -49,22 +51,22 @@ bool transformRearAxisToOdom(
 	return true;
 }
 
-bool transformRearAxisPointsToOdom(
-		tf::TransformListener *pTfListener,
+bool RoadModel::transformRearAxisPointsToOdom(
+		tf2_ros::Buffer *pTfBuffer,
 		std::vector<cv::Point2f> &rearAxisPts,
-		std::vector<tf::Stamped<tf::Point>> &odomPts)
+		std::vector<geometry_msgs::PointStamped> &odomPts)
 {
 	odomPts.resize(rearAxisPts.size());
 
 	for(int i = 0; i < rearAxisPts.size(); i++) {
-		tf::Stamped<tf::Point> stampedRearAxis;
-		stampedRearAxis.frame_id_ = "rear_axis_middle_ground";
-		stampedRearAxis.stamp_ = ros::Time(0);
-		stampedRearAxis.setX(rearAxisPts.at(i).x);
-		stampedRearAxis.setY(rearAxisPts.at(i).y);
-		stampedRearAxis.setZ(0.0f);
+		geometry_msgs::PointStamped stampedRearAxis;
+		stampedRearAxis.header.frame_id = movingFrame;
+		stampedRearAxis.header.stamp = ros::Time(0);
+		stampedRearAxis.point.x = rearAxisPts.at(i).x;
+		stampedRearAxis.point.y = rearAxisPts.at(i).y;
+		stampedRearAxis.point.z = 0;
 
-		if(!transformRearAxisToOdom(pTfListener, stampedRearAxis, odomPts.at(i))) {
+		if(!transformRearAxisToOdom(pTfBuffer, stampedRearAxis, odomPts.at(i))) {
 			return false;
 			ROS_ERROR("transformRearAxisPointsToOdom");
 		}
@@ -155,7 +157,8 @@ void PolynomAverageFilter::setHistoryLength(int l) {
 // ============================================================
 
 void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::vector<float> &angles, ros::Time stamp) {
-	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
+//	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
+	std::vector<geometry_msgs::PointStamped> odomPts, rearAxisPts;
 
 	for(auto s : segmentsToDl) {
 		if(s.odomPointsSet) {
@@ -173,7 +176,7 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 		}
 	}
 
-	if(!transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts)) {
+	if(!transformOdomPointsToRearAxis(pTfBuffer, odomPts, rearAxisPts)) {
 		return;
 	}
 
@@ -184,8 +187,8 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 	getDrivingLine(drivingLine);
 
 	for(int i = 0; i < rearAxisPts.size(); i += 2) {
-		cv::Point2f startPt(rearAxisPts.at(i).x(),   rearAxisPts.at(i).y());
-		cv::Point2f endPt  (rearAxisPts.at(i+1).x(), rearAxisPts.at(i+1).y());
+		cv::Point2f startPt(rearAxisPts.at(i).point.x,   rearAxisPts.at(i).point.y);
+		cv::Point2f endPt  (rearAxisPts.at(i+1).point.x, rearAxisPts.at(i+1).point.y);
 
 		if(startPt.x < 0.f) {
 //			ROS_INFO("  remove first point");
@@ -226,7 +229,7 @@ void RoadModel::getSegmentPositions(std::vector<cv::Point2f> &positions, std::ve
 
 void RoadModel::setOdomPointsForSegments() {
 	std::vector<cv::Point2f> rearAxisPts;
-	std::vector<tf::Stamped<tf::Point>> odomPts;
+	std::vector<geometry_msgs::PointStamped> odomPts;
 
 	for(int i = 0; i < segmentsToDl.size(); i++) {
 		if(segmentsToDl.at(i).odomPointsSet) {
@@ -247,7 +250,7 @@ void RoadModel::setOdomPointsForSegments() {
 			rearAxisPts.push_back(segmentsToDl.at(i).rightLineEnd); // idx 5
 		}
 
-		if(transformRearAxisPointsToOdom(pTfListener, rearAxisPts, odomPts)) {
+		if(transformRearAxisPointsToOdom(pTfBuffer, rearAxisPts, odomPts)) {
 			size_t odomIdx = 0;
 			segmentsToDl.at(i).odomStart = odomPts.at(odomIdx++);
 			segmentsToDl.at(i).odomEnd = odomPts.at(odomIdx++);
@@ -259,7 +262,7 @@ void RoadModel::setOdomPointsForSegments() {
 				segmentsToDl.at(i).odomRightLineStart = odomPts.at(odomIdx++);
 				segmentsToDl.at(i).odomRightLineEnd = odomPts.at(odomIdx++);
 			}
-			segmentsToDl.at(i).creationTimestamp = odomPts.at(0).stamp_;
+			segmentsToDl.at(i).creationTimestamp = odomPts.at(0).header.stamp;
 			segmentsToDl.at(i).odomPointsSet = true;
 		}
 	}
@@ -290,12 +293,12 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &po
     }
 
     // kappa = (std::atan2(forwardDistanceY, forwardDistanceX));
-    // kappa should not be greater than 25[deg]
 
-    float potentialKappaAbs = fabsf(std::atan2(segmentToAdd->positionWorld.x, segmentToAdd->positionWorld.y));
-    float kappaLimit = 25.f / 180.f * M_PI;
+    float potentialKappaAbs = fabsf(std::atan2(segmentToAdd->positionWorld.y, segmentToAdd->positionWorld.x));
+    float kappaLimit = 40.f / 180.f * M_PI;
+    ROS_INFO("kappa = %.2f, limit = %.2f", potentialKappaAbs, kappaLimit);
     if(potentialKappaAbs > kappaLimit) {
-    	ROS_WARN("  potential kappa is %.f[deg]", potentialKappaAbs / 180.f * M_PI);
+    	ROS_WARN("  potential kappa is %.f[deg]", potentialKappaAbs / M_PI * 180.f);
     	return false;
     }
 
@@ -333,7 +336,7 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &po
 }
 
 bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
-  std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
+  std::vector<geometry_msgs::PointStamped> odomPts, rearAxisPts;
 
   // 1) Convert the odom pointst to rear_axis_middle_ground
   int segCtr = 0; // DEBUG
@@ -350,8 +353,8 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
           odomPts.push_back(s.odomLeftLineStart);
 
           auto odomMid = s.odomLeftLineStart;
-          odomMid.setX(odomMid.x() + .5f * (s.odomLeftLineEnd.x() - s.odomLeftLineStart.x()));
-          odomMid.setY(odomMid.y() + .5f * (s.odomLeftLineEnd.y() - s.odomLeftLineStart.y()));
+          odomMid.point.x = (odomMid.point.x + .5f * (s.odomLeftLineEnd.point.x - s.odomLeftLineStart.point.x));
+          odomMid.point.y = (odomMid.point.y + .5f * (s.odomLeftLineEnd.point.y - s.odomLeftLineStart.point.y));
           odomPts.push_back(odomMid);
 
           odomPts.push_back(s.odomLeftLineEnd);
@@ -360,8 +363,8 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
           odomPts.push_back(s.odomRightLineStart);
 
           auto odomMid = s.odomRightLineStart;
-          odomMid.setX(odomMid.x() + .5f * (s.odomRightLineEnd.x() - s.odomRightLineStart.x()));
-          odomMid.setY(odomMid.y() + .5f * (s.odomRightLineEnd.y() - s.odomRightLineStart.y()));
+          odomMid.point.x = (odomMid.point.x + .5f * (s.odomRightLineEnd.point.x - s.odomRightLineStart.point.x));
+          odomMid.point.y = (odomMid.point.y + .5f * (s.odomRightLineEnd.point.y - s.odomRightLineStart.point.y));
           odomPts.push_back(odomMid);
 
           odomPts.push_back(s.odomRightLineEnd);
@@ -377,13 +380,13 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
   if(odomPts.empty()) {
     return false;
   }
-  transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts);
+  transformOdomPointsToRearAxis(pTfBuffer, odomPts, rearAxisPts);
 
   // 2) Collect points for the polynoms
   std::vector<cv::Point2f> linePts;
 
   for(auto p : rearAxisPts) {
-    linePts.push_back(cv::Point2f(p.x(), p.y()));
+    linePts.push_back(cv::Point2f(p.point.x, p.point.y));
   }
 
   if(linePts.size() < 4) {
@@ -391,7 +394,7 @@ bool RoadModel::getLaneMarkings(Polynom &line, bool leftLine) {
   }
 
   float detectionRange = std::max_element(rearAxisPts.begin(), rearAxisPts.end(),
-		  [](tf::Stamped<tf::Point> &a, tf::Stamped<tf::Point>&b) { return a.x() < b.x(); } )->x();
+		  [](geometry_msgs::PointStamped &a, geometry_msgs::PointStamped&b) { return a.point.x < b.point.x; } )->point.x;
 
   // 3) Build the polynom
   Polynom linePoly(defaultPolyOrder, linePts);
@@ -430,7 +433,7 @@ float RoadModel::getDrivingLine(Polynom &drivingLine) {
 }
 
 void RoadModel::buildDrivingLine() {
-	std::vector<tf::Stamped<tf::Point>> odomMidPts, rearAxisMidPts;
+	std::vector<geometry_msgs::PointStamped> odomMidPts, rearAxisMidPts;
 
 	// 1) Convert the odom points to rear_axis_middle_ground
 	for(auto s : segmentsToDl) {
@@ -439,8 +442,8 @@ void RoadModel::buildDrivingLine() {
 				odomMidPts.push_back(s.odomStart);
 				// Add a point in the middle of the segment
 				auto odomMid = s.odomStart;
-				odomMid.setX(odomMid.x() + .5f * (s.odomEnd.x() - s.odomStart.x()));
-				odomMid.setY(odomMid.y() + .5f * (s.odomEnd.y() - s.odomStart.y()));
+				odomMid.point.x = (odomMid.point.x + .5f * (s.odomEnd.point.x - s.odomStart.point.x));
+				odomMid.point.y = (odomMid.point.y + .5f * (s.odomEnd.point.y - s.odomStart.point.y));
 				odomMidPts.push_back(odomMid);
 			} else {
 				break;
@@ -450,14 +453,14 @@ void RoadModel::buildDrivingLine() {
 		}
 	}
 
-	transformOdomPointsToRearAxis(pTfListener, odomMidPts, rearAxisMidPts);
+	transformOdomPointsToRearAxis(pTfBuffer, odomMidPts, rearAxisMidPts);
 
 	// 2) Collect points for the polynoms
 	std::vector<cv::Point2f> drivingLinePts;
 	// we always add a point in front of the vehicle
 	drivingLinePts.push_back(cv::Point2f(.3f, 0.f));
 	for(auto sp : rearAxisMidPts) {
-		drivingLinePts.push_back(cv::Point2f(sp.x(), sp.y()));
+		drivingLinePts.push_back(cv::Point2f(sp.point.x, sp.point.y));
 	}
 
 	//  ROS_INFO("Built driving line polynom from %lu points from %lu segments", drivingLinePts.size(), segmentsToDl.size());
@@ -524,7 +527,7 @@ void RoadModel::addIntersectionAt(float x, float confidence, bool hasStopLine) {
 	intersections.push_back(Intersection(x, confidence, hasStopLine));
 }
 
-bool RoadModel::getIntersections(std::vector<tf::Stamped<tf::Point>> &positions, std::vector<float> &confidences,
+bool RoadModel::getIntersections(std::vector<geometry_msgs::PointStamped> &positions, std::vector<float> &confidences,
 		std::vector<bool> &hasStopLine, Polynom &drivingLine) {
 	if(intersections.empty()) {
 		return false;
@@ -533,14 +536,14 @@ bool RoadModel::getIntersections(std::vector<tf::Stamped<tf::Point>> &positions,
 	// 1) Convert distances to positions
 	for(auto it = intersections.begin(); it != intersections.end(); ++it) {
 		if(!it->odomSet) {
-			tf::Stamped<tf::Point> rearAxisPt, odomPt;
-			rearAxisPt.frame_id_ = "rear_axis_middle_ground";
-			rearAxisPt.stamp_ = ros::Time(0);
-			rearAxisPt.setX(it->distanceTo);
-			rearAxisPt.setY(drivingLine.atX(it->distanceTo));
-			rearAxisPt.setZ(0.0f);
+			geometry_msgs::PointStamped rearAxisPt, odomPt;
+			rearAxisPt.header.frame_id = "rear_axis_middle_ground";
+			rearAxisPt.header.stamp = ros::Time(0);
+			rearAxisPt.point.x = it->distanceTo;
+			rearAxisPt.point.y = drivingLine.atX(it->distanceTo);
+			rearAxisPt.point.z = 0;
 
-			if(transformRearAxisToOdom(pTfListener, rearAxisPt, odomPt)) {
+			if(transformRearAxisToOdom(pTfBuffer, rearAxisPt, odomPt)) {
 				it->odomPosition = odomPt;
 				it->odomSet = true;
 			}
@@ -552,8 +555,8 @@ bool RoadModel::getIntersections(std::vector<tf::Stamped<tf::Point>> &positions,
 		for(auto j = i + 1; j != intersections.end(); ++j) {
 			if(i->odomSet && j->odomSet && (i->confidence > 0.f) && (j->confidence > 0.f)) {
 				// calculate distance between points
-				auto xDist = i->odomPosition.x() - j->odomPosition.x();
-				auto yDist = i->odomPosition.y() - j->odomPosition.y();
+				auto xDist = i->odomPosition.point.x - j->odomPosition.point.x;
+				auto yDist = i->odomPosition.point.y - j->odomPosition.point.y;
 				auto dist = sqrtf(xDist*xDist + yDist*yDist);
 				if(dist < .3f) {
 					i->confidence = i->confidence + .3f;
@@ -568,16 +571,16 @@ bool RoadModel::getIntersections(std::vector<tf::Stamped<tf::Point>> &positions,
 	intersections.erase(lastElemToKeep, intersections.end());
 
 	// 3) Transform all odomPosition to rearAxis and return them
-	std::vector<tf::Stamped<tf::Point>> odomPts, rearAxisPts;
+	std::vector<geometry_msgs::PointStamped> odomPts, rearAxisPts;
 	for(auto i : intersections) {
 		if(i.odomSet) {
 			odomPts.push_back(i.odomPosition);
 		}
 	}
 
-	if(transformOdomPointsToRearAxis(pTfListener, odomPts, rearAxisPts)) {
+	if(transformOdomPointsToRearAxis(pTfBuffer, odomPts, rearAxisPts)) {
 		for(int i = 0; i < rearAxisPts.size(); i++) {
-			if(rearAxisPts.at(i).x() < .3f) {
+			if(rearAxisPts.at(i).point.x < .3f) {
 				intersections.at(i).confidence = -1.f;
 			} else {
 				positions.push_back(rearAxisPts.at(i));

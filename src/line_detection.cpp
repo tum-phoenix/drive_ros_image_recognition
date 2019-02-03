@@ -31,7 +31,8 @@ LineDetection::LineDetection(const ros::NodeHandle nh, const ros::NodeHandle pnh
     , image_operator_()
     , dsrv_server_()
     , dsrv_cb_(boost::bind(&LineDetection::reconfigureCB, this, _1, _2))
-    , roadModel(&tfListener_, laneWidthWorld_)
+	, tfListener(tfBuffer)
+	, roadModel(&tfBuffer, laneWidthWorld_, pnh)
 {
 }
 
@@ -174,7 +175,7 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     drivingLinePub.publish(drivingLineMsg);
 
     // Check if we found an intersection
-    std::vector<tf::Stamped<tf::Point>> intersectionPositions;
+    std::vector<geometry_msgs::PointStamped> intersectionPositions;
     std::vector<float> intersectionConfidences;
     std::vector<bool> intersectionStopLines;
     bool foundIntersections = roadModel.getIntersections(intersectionPositions, intersectionConfidences,
@@ -183,15 +184,12 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     intersectionMsg.header.stamp = imgTimestamp;
     if(foundIntersections) {
     	for(int i = 0; i < intersectionPositions.size(); i++) {
-    		geometry_msgs::PointStamped ptStamped;
-    		tf::pointStampedTFToMsg(intersectionPositions.at(i), ptStamped);
-    		intersectionMsg.positions.push_back(ptStamped);
+    		intersectionMsg.positions.push_back(intersectionPositions.at(i));
     		intersectionMsg.confidences.push_back(intersectionConfidences.at(i));
     		intersectionMsg.stop_line_detected.push_back(intersectionStopLines.at(i));
     	}
-
-    	// Publish the message
     }
+    // Publish the message
     detectedIntersectionsPub.publish(intersectionMsg);
 #ifdef PUBLISH_DEBUG
     std::function<void (Polynom&, cv::Scalar)> drawLaneMarking = [this, detectionRange](Polynom &poly, cv::Scalar color) {
@@ -221,7 +219,7 @@ void LineDetection::processIncomingImage(cv::Mat &homographedImg) {
     if(foundIntersections) {
     	std::vector<cv::Point2f> worldPts, imgPts;
     	for(int i = 0; i < intersectionPositions.size(); i++) {
-    		worldPts.push_back(cv::Point2f(intersectionPositions.at(i).x(), intersectionPositions.at(i).y()));
+    		worldPts.push_back(cv::Point2f(intersectionPositions.at(i).point.x, intersectionPositions.at(i).point.y));
     	}
 
     	if(image_operator_.worldToWarpedImg(worldPts, imgPts)) {

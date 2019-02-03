@@ -15,6 +15,8 @@
     <arg name="nodelet_manager" default=""/>
     <arg name="line_detection_debug_image_topic" default="/line_detection_debug_image"/>
     <arg name="output" default="screen"/>
+    <arg name="static_frame" default="odom"/>
+    <arg name="moving_frame" default="rear_axis_middle_ground"/>
 
     <include file="$(find drive_ros_image_recognition)/launch/warp_image.launch">
         <arg name="camera_image_topic" value="$(arg camera_image_topic)"/>
@@ -41,6 +43,8 @@
         <arg name="nodelet_manager" value="$(arg nodelet_manager)"/>
         <arg name="line_detection_debug_image_topic" default="$(arg line_detection_debug_image_topic)"/>
         <arg name="output" value="$(arg output)"/>
+        <arg name="static_frame" value="$(arg static_frame)"/>
+        <arg name="moving_frame" value="$(arg moving_frame)"/>
     </include>
 
     <include file="$(find drive_ros_street_marking_detection)/launch/street_marking_detection.launch">
