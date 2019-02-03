@@ -277,7 +277,6 @@ void RoadModel::updateSegmentAtIndex(Segment &seg, int index) {
 
 bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &possibleIntersection) {
     bool isFirstSegment = (index == 0);
-//    float angleVar = M_PI / 7.0f; // TODO move to config
     possibleIntersection = false;
 
     // Some basic checks
@@ -287,6 +286,16 @@ bool RoadModel::segmentFitsToPrevious(Segment *segmentToAdd, int index, bool &po
     }
     if(segmentToAdd->length < .05f) {
     	ROS_INFO("  segment too short: %.2f[m]", segmentToAdd->length);
+    	return false;
+    }
+
+    // kappa = (std::atan2(forwardDistanceY, forwardDistanceX));
+    // kappa should not be greater than 25[deg]
+
+    float potentialKappaAbs = fabsf(std::atan2(segmentToAdd->positionWorld.x, segmentToAdd->positionWorld.y));
+    float kappaLimit = 25.f / 180.f * M_PI;
+    if(potentialKappaAbs > kappaLimit) {
+    	ROS_WARN("  potential kappa is %.f[deg]", potentialKappaAbs / 180.f * M_PI);
     	return false;
     }
 
