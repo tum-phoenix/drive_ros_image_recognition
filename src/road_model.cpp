@@ -1,5 +1,6 @@
 #include <ros/ros.h>
 #include "drive_ros_image_recognition/road_model.h"
+#include <numeric>
 
 namespace drive_ros_image_recognition {
 
