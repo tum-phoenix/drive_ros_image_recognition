@@ -16,6 +16,8 @@
         <node if="$(eval arg('nodelet_manager') == '')" pkg="nodelet" type="nodelet" name="$(arg manager_used)"  args="manager" output="screen"/>
     </group>
 
+    <node pkg="rosbag" type="play" name="player" output="screen" args="-l $(arg bag_file)"/>
+
     <include file="$(find drive_ros_image_recognition)/launch/warp_image.launch">
         <arg name="camera_image_topic" value="$(arg bag_image_topic)"/>
         <arg name="warped_image_topic" value="$(arg warped_image_topic)"/>
