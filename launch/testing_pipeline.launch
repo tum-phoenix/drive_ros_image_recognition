@@ -6,7 +6,7 @@
     <arg name="nodelet_manager" default=""/>
     <arg name="run_python" default="false"/>
 
-    <include file="$(find drive_ros_ximea_importer)/launch/homography_publisher.launch">
+    <include file="$(find homography_publisher)/launch/homography_publisher.launch">
         <arg name="vehicle" value="cc2017_car"/>
     </include>
 
