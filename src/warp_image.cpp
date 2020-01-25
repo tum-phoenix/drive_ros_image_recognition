@@ -32,7 +32,7 @@ bool WarpContent::init() {
 }
 
 void WarpContent::world_image_callback(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::CameraInfoConstPtr& info_msg) {
-
+  ROS_INFO("Image warper received image_raw");
   try {
     // copy
     current_image_ = cv_bridge::toCvCopy(msg, "")->image;

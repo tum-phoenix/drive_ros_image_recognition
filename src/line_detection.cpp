@@ -15,7 +15,7 @@
 #include "drive_ros_msgs/simple_trajectory.h"
 #include "drive_ros_msgs/DrivingLine.h"
 #include "drive_ros_msgs/DetectedIntersection.h"
-#include "bt_node/value_definitions.h" // for sign ID definitions
+#include "drive_ros_msgs/value_definitions.h" // for sign ID definitions
 
 namespace drive_ros_image_recognition {
 
