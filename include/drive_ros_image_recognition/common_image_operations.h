@@ -301,6 +301,7 @@ public:
       return false;
     }
     dstImg = cv::Mat::zeros( srcImg.rows, srcImg.cols, srcImg.type() );
+    ROS_INFO_STREAM("Homography matrix "<<scaledCam2world_);
     cv::warpPerspective(srcImg, dstImg, scaledCam2world_, transformed_size_);
     return true;
   }
